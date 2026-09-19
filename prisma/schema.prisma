@@ -1,0 +1,398 @@
+// =====================================================================
+// Plataforma de Microcrédito com Split Mercado Pago — Schema v1
+// Banco: PostgreSQL (Supabase). Valores monetários em Decimal(14,2).
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Supabase: conexão direta p/ migrations
+}
+
+// ----------------------------- ENUMS ---------------------------------
+
+enum MerchantStatus {
+  PENDING_OAUTH   // cadastrado, ainda não vinculou a conta MP
+  ACTIVE
+  SUSPENDED
+  OAUTH_REVOKED   // comerciante revogou o acesso no MP -> alerta crítico
+}
+
+enum LoanStatus {
+  DRAFT
+  ACTIVE
+  PAID
+  ACCELERATED     // vencimento antecipado declarado
+  RENEGOTIATED
+  CANCELLED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+  WAIVED
+}
+
+enum ChargeType {
+  PIX_BALCAO      // Pix dinâmico via Checkout Transparente (application_fee)
+  PAYMENT_LINK    // Preferência Checkout Pro (marketplace_fee)
+  AVULSA          // cobrança direta da parcela (status Amarelo), 100% p/ matriz
+}
+
+enum ChargeStatus {
+  CREATED
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  EXPIRED
+  REFUNDED
+}
+
+enum DailyStatus {
+  GREEN
+  YELLOW
+  RED
+}
+
+enum AlertType {
+  LOW_VOLUME            // Amarelo
+  SPLIT_BYPASS          // venda fora do split (1 dia)
+  CONTRACT_BREACH       // Vermelho: desvio por 2 dias seguidos
+  OAUTH_REFRESH_FAILED
+  OAUTH_REVOKED
+  SYNC_FAILED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  OPEN
+  UNDER_REVIEW
+  CONFIRMED       // operador confirmou a infração
+  DISMISSED       // falso positivo (estorno, transferência etc.)
+  RESOLVED
+}
+
+enum NoticeStatus {
+  DRAFT           // gerada automaticamente, aguardando revisão humana
+  APPROVED
+  SENT
+  CANCELLED
+}
+
+// ----------------------------- MODELOS -------------------------------
+
+model Operator {
+  id          String   @id @default(uuid()) @db.Uuid
+  email       String   @unique
+  name        String
+  role        String   @default("analyst") // admin | analyst
+  createdAt   DateTime @default(now())
+
+  reviewedAlerts  Alert[]              @relation("AlertReviewer")
+  approvedNotices AccelerationNotice[] @relation("NoticeApprover")
+  auditLogs       AuditLog[]
+}
+
+model Merchant {
+  id              String         @id @default(uuid()) @db.Uuid
+  legalName       String
+  tradeName       String?
+  document        String         @unique // CNPJ ou CPF (MEI), só dígitos
+  ownerName       String
+  ownerCpf        String
+  whatsapp        String         // E.164: +5517999999999
+  email           String?
+  addressCity     String
+  addressState    String         @db.Char(2)
+  status          MerchantStatus @default(PENDING_OAUTH)
+  mpUserId        BigInt?        @unique // user_id retornado pelo OAuth
+  lgpdConsentAt   DateTime?      // consentimento p/ leitura do extrato
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  oauthToken      OAuthToken?
+  loans           Loan[]
+  charges         Charge[]
+  mpPayments      MpPayment[]
+  dailyAudits     DailyAudit[]
+  alerts          Alert[]
+
+  @@index([status])
+}
+
+// Tokens SEMPRE criptografados na aplicação (AES-256-GCM).
+// Nunca armazene o token em texto puro, nem mesmo no Supabase.
+model OAuthToken {
+  id                    String    @id @default(uuid()) @db.Uuid
+  merchantId            String    @unique @db.Uuid
+  merchant              Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  accessTokenEnc        String    // base64(iv|tag|ciphertext)
+  refreshTokenEnc       String
+  publicKey             String?
+  scope                 String?
+  liveMode              Boolean   @default(true)
+  expiresAt             DateTime  // now + expires_in
+  lastRefreshedAt       DateTime?
+  refreshFailures       Int       @default(0)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([expiresAt]) // o cron de renovação varre por aqui
+}
+
+// Guarda o "state" (anti-CSRF) e o code_verifier (PKCE) do fluxo OAuth.
+model OAuthState {
+  state         String   @id
+  merchantId    String   @db.Uuid
+  codeVerifier  String?
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime @default(now())
+}
+
+model Loan {
+  id                  String     @id @default(uuid()) @db.Uuid
+  merchantId          String     @db.Uuid
+  merchant            Merchant   @relation(fields: [merchantId], references: [id])
+
+  contractNumber      String     @unique
+  principal           Decimal    @db.Decimal(14, 2)
+  totalPayable        Decimal    @db.Decimal(14, 2) // principal + encargos
+  monthlyRate         Decimal    @db.Decimal(7, 4)  // ex.: 0.0450 = 4,5% a.m.
+  termDays            Int                           // nº de dias úteis de retenção
+  dailyInstallment    Decimal    @db.Decimal(14, 2) // meta diária de retenção
+  splitPercent        Decimal    @db.Decimal(5, 2)  // % retido em cada venda
+  businessDaysOnly    Boolean    @default(true)
+  graceDaysForBreach  Int        @default(2)        // dias seguidos p/ Vermelho
+  promissoryNoteRef   String?                       // nº/arquivo da NP
+  status              LoanStatus @default(DRAFT)
+  disbursedAt         DateTime?
+  firstDueDate        DateTime   @db.Date
+  acceleratedAt       DateTime?
+  outstandingBalance  Decimal    @db.Decimal(14, 2)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  installments        Installment[]
+  charges             Charge[]
+  dailyAudits         DailyAudit[]
+  notices             AccelerationNotice[]
+
+  @@index([merchantId, status])
+}
+
+model Installment {
+  id            String            @id @default(uuid()) @db.Uuid
+  loanId        String            @db.Uuid
+  loan          Loan              @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  sequence      Int
+  dueDate       DateTime          @db.Date
+  amountDue     Decimal           @db.Decimal(14, 2)
+  amountPaid    Decimal           @default(0) @db.Decimal(14, 2)
+  status        InstallmentStatus @default(PENDING)
+  paidAt        DateTime?
+
+  allocations   ChargeAllocation[]
+
+  @@unique([loanId, sequence])
+  @@unique([loanId, dueDate])
+  @@index([dueDate, status])
+}
+
+// Toda cobrança criada PELA NOSSA aplicação. É a fonte da verdade para
+// saber o que "passou pelo split" — a conciliação cruza por mpPaymentId.
+model Charge {
+  id               String       @id @default(uuid()) @db.Uuid
+  merchantId       String       @db.Uuid
+  merchant         Merchant     @relation(fields: [merchantId], references: [id])
+  loanId           String?      @db.Uuid
+  loan             Loan?        @relation(fields: [loanId], references: [id])
+
+  type             ChargeType
+  status           ChargeStatus @default(CREATED)
+  grossAmount      Decimal      @db.Decimal(14, 2)
+  feeAmount        Decimal      @db.Decimal(14, 2) // application_fee / marketplace_fee
+  idempotencyKey   String       @unique            // header X-Idempotency-Key
+  externalRef      String       @unique            // external_reference enviado ao MP
+
+  mpPaymentId      BigInt?      @unique // /v1/payments (Pix)
+  mpPreferenceId   String?      @unique // Checkout Pro (link)
+  qrCode           String?              // copia-e-cola
+  qrCodeBase64     String?
+  paymentUrl       String?              // init_point / ticket_url
+  expiresAt        DateTime?
+  whatsappSentAt   DateTime?
+  approvedAt       DateTime?
+  rawResponse      Json?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  allocations      ChargeAllocation[]
+
+  @@index([merchantId, createdAt])
+  @@index([status])
+}
+
+// Quanto de cada cobrança aprovada abateu cada parcela.
+model ChargeAllocation {
+  id             String      @id @default(uuid()) @db.Uuid
+  chargeId       String      @db.Uuid
+  charge         Charge      @relation(fields: [chargeId], references: [id])
+  installmentId  String      @db.Uuid
+  installment    Installment @relation(fields: [installmentId], references: [id])
+  amount         Decimal     @db.Decimal(14, 2)
+  createdAt      DateTime    @default(now())
+
+  @@unique([chargeId, installmentId])
+}
+
+// Espelho do extrato do comerciante (/v1/payments/search com o token DELE).
+model MpPayment {
+  id                  String    @id @default(uuid()) @db.Uuid
+  merchantId          String    @db.Uuid
+  merchant            Merchant  @relation(fields: [merchantId], references: [id])
+  mpPaymentId         BigInt    @unique
+  status              String    // approved, refunded, charged_back...
+  statusDetail        String?
+  operationType       String?   // regular_payment, money_transfer...
+  paymentMethodId     String?   // pix, visa, master, account_money...
+  paymentTypeId       String?   // credit_card, debit_card, bank_transfer...
+  pointOfInteraction  String?   // tipo de POI (identifica maquininha Point)
+  transactionAmount   Decimal   @db.Decimal(14, 2)
+  netReceivedAmount   Decimal?  @db.Decimal(14, 2)
+  applicationFee      Decimal?  @db.Decimal(14, 2)
+  viaSplit            Boolean   // true se mpPaymentId existe em Charge
+  countsAsSale        Boolean   // false p/ transferências, estornos etc.
+  excludedFromAudit   Boolean   @default(false) // operador marcou como legítimo
+  excludedReason      String?
+  dateApproved        DateTime?
+  dateCreated         DateTime
+  raw                 Json
+  syncedAt            DateTime  @default(now())
+
+  @@index([merchantId, dateApproved])
+}
+
+// Resultado consolidado da auditoria de 1 dia para 1 contrato.
+model DailyAudit {
+  id                   String      @id @default(uuid()) @db.Uuid
+  merchantId           String      @db.Uuid
+  merchant             Merchant    @relation(fields: [merchantId], references: [id])
+  loanId               String      @db.Uuid
+  loan                 Loan        @relation(fields: [loanId], references: [id])
+  referenceDate        DateTime    @db.Date
+
+  totalSales           Decimal     @db.Decimal(14, 2) // tudo que entrou como venda
+  splitSales           Decimal     @db.Decimal(14, 2) // vendas via nossas cobranças
+  nonSplitSales        Decimal     @db.Decimal(14, 2)
+  retainedAmount       Decimal     @db.Decimal(14, 2) // soma das fees do dia
+  dailyTarget          Decimal     @db.Decimal(14, 2)
+  nonSplitPaymentCount Int         @default(0)
+  consecutiveBypassDays Int        @default(0)
+  isDueDay             Boolean     @default(false) // havia parcela neste dia
+  syncOk               Boolean     @default(true)  // extrato foi lido com sucesso
+  status               DailyStatus
+  notes                String?
+  computedAt           DateTime    @default(now())
+
+  @@unique([loanId, referenceDate])
+  @@index([status, referenceDate])
+}
+
+model Alert {
+  id            String        @id @default(uuid()) @db.Uuid
+  merchantId    String        @db.Uuid
+  merchant      Merchant      @relation(fields: [merchantId], references: [id])
+  loanId        String?       @db.Uuid
+  type          AlertType
+  severity      AlertSeverity
+  status        AlertStatus   @default(OPEN)
+  title         String
+  details       Json          // ids dos pagamentos fora do split, valores etc.
+  referenceDate DateTime?     @db.Date
+  reviewedById  String?       @db.Uuid
+  reviewedBy    Operator?     @relation("AlertReviewer", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  reviewNote    String?
+  createdAt     DateTime      @default(now())
+
+  notice        AccelerationNotice?
+
+  @@index([status, severity])
+  @@index([merchantId, createdAt])
+}
+
+// Notificação de vencimento antecipado. Nasce DRAFT; só vira SENT
+// após aprovação humana (approvedBy obrigatório na regra de serviço).
+model AccelerationNotice {
+  id              String       @id @default(uuid()) @db.Uuid
+  loanId          String       @db.Uuid
+  loan            Loan         @relation(fields: [loanId], references: [id])
+  alertId         String       @unique @db.Uuid
+  alert           Alert        @relation(fields: [alertId], references: [id])
+  status          NoticeStatus @default(DRAFT)
+  amountDue       Decimal      @db.Decimal(14, 2)
+  documentUrl     String?      // PDF gerado da notificação
+  approvedById    String?      @db.Uuid
+  approvedBy      Operator?    @relation("NoticeApprover", fields: [approvedById], references: [id])
+  approvedAt      DateTime?
+  sentAt          DateTime?
+  sentChannel     String?      // whatsapp, email, cartório
+  createdAt       DateTime     @default(now())
+}
+
+// Webhooks do MP chegam duplicados/fora de ordem: deduplicar por id.
+model WebhookEvent {
+  id           String    @id @default(uuid()) @db.Uuid
+  source       String    @default("mercadopago")
+  eventId      String    @unique // id da notificação
+  topic        String    // payment, merchant_order...
+  resourceId   String
+  payload      Json
+  processedAt  DateTime?
+  error        String?
+  receivedAt   DateTime  @default(now())
+}
+
+// Trilha de auditoria imutável (quem fez o quê e quando).
+model AuditLog {
+  id          BigInt    @id @default(autoincrement())
+  operatorId  String?   @db.Uuid
+  operator    Operator? @relation(fields: [operatorId], references: [id])
+  actor       String    // "system:cron-audit", "operator:<email>"
+  action      String    // "loan.accelerate", "alert.dismiss"...
+  entity      String
+  entityId    String
+  before      Json?
+  after       Json?
+  ip          String?
+  createdAt   DateTime  @default(now())
+
+  @@index([entity, entityId])
+}
+
+// Histórico de execuções dos jobs (monitoramento pelo dashboard).
+model JobRun {
+  id          BigInt    @id @default(autoincrement())
+  job         String
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  ok          Boolean?
+  stats       Json?
+  error       String?
+
+  @@index([job, startedAt])
+}
