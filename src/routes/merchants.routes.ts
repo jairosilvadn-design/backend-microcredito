@@ -5,6 +5,10 @@ import { prisma } from '../lib/prisma';
 import { D } from '../lib/money';
 import { addDaysYmd, dbDateToYmd, isValidYmd, ymdSaoPaulo, ymdToDbDate } from '../lib/dates';
 import { requireAdmin, requireOperator } from '../plugins/auth';
+import { getMerchantAccessToken, OAuthFlowError } from '../services/mercadopago/oauth.service';
+import { MercadoPagoError } from '../services/mercadopago/http';
+import { fetchPaymentsUpdatedBetween } from '../services/audit/statement-sync.service';
+import { analysisPeriod, summarizeSales } from '../services/audit/credit-analysis.service';
 
 // ---------------------------------------------------------------------------
 // Utilitários de cadastro
@@ -310,6 +314,47 @@ export async function merchantsRoutes(app: FastifyInstance) {
         }
         throw err;
       }
+    }
+  });
+
+  /**
+   * Análise de vendas para concessão de crédito: lê o histórico do Mercado Pago
+   * do comerciante (sem gravar nada) e devolve indicadores + sugestão de parcela.
+   */
+  app.get('/api/merchants/:id/analysis', async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const q = z.object({
+      days: z.coerce.number().int().refine((d) => [30, 60, 90].includes(d)).default(60),
+      split: z.coerce.number().min(0.01).max(99).default(10),
+      term: z.coerce.number().int().min(1).max(365).default(60),
+    }).parse(req.query);
+
+    const merchant = await prisma.merchant.findUnique({ where: { id } });
+    if (!merchant) return reply.code(404).send({ error: 'not_found', message: 'Comerciante não encontrado' });
+    if (merchant.status !== 'ACTIVE') {
+      return reply.code(409).send({ error: 'merchant_not_linked', message: 'O comerciante precisa estar vinculado ao Mercado Pago para a análise.' });
+    }
+
+    const period = analysisPeriod(q.days);
+    try {
+      const token = await getMerchantAccessToken(id);
+      const payments = await fetchPaymentsUpdatedBetween(token, period.begin, period.end, 0, 'date_created');
+      const result = summarizeSales(payments, {
+        fromYmd: period.fromYmd,
+        toYmd: period.toYmd,
+        merchantMpUserId: merchant.mpUserId,
+        splitPercent: q.split,
+        termDays: q.term,
+      });
+      await audit(req, 'merchant.credit_analysis', 'Merchant', id, { days: q.days, sales: result.totals.sales, count: result.totals.count });
+      return result;
+    } catch (err) {
+      if (err instanceof OAuthFlowError) return reply.code(409).send({ error: err.code, message: 'O acesso ao Mercado Pago deste comerciante não está disponível. Gere um novo link de vinculação.' });
+      if (err instanceof MercadoPagoError) {
+        req.log.warn({ status: err.status }, 'Mercado Pago recusou a leitura do extrato');
+        return reply.code(502).send({ error: 'mercadopago_error', message: `O Mercado Pago não respondeu à consulta (erro ${err.status}). Tente de novo em instantes.` });
+      }
+      throw err;
     }
   });
 

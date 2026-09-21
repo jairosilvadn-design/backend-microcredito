@@ -27,15 +27,16 @@ export async function fetchPaymentsUpdatedBetween(
   begin: Date,
   end: Date,
   depth = 0,
+  range: 'date_last_updated' | 'date_created' = 'date_last_updated',
 ): Promise<MpPayment[]> {
   const collected: MpPayment[] = [];
   let offset = 0;
 
   for (;;) {
     const qs = new URLSearchParams({
-      sort: 'date_last_updated',
+      sort: range,
       criteria: 'asc',
-      range: 'date_last_updated',
+      range,
       begin_date: toMpDate(begin),
       end_date: toMpDate(end),
       limit: String(PAGE_SIZE),
@@ -47,8 +48,8 @@ export async function fetchPaymentsUpdatedBetween(
     const canSplit = end.getTime() - begin.getTime() > MIN_WINDOW_MS && depth < 10;
     if (offset === 0 && total > MAX_RESULTS_PER_WINDOW && canSplit) {
       const mid = new Date(Math.floor((begin.getTime() + end.getTime()) / 2));
-      const left = await fetchPaymentsUpdatedBetween(token, begin, mid, depth + 1);
-      const right = await fetchPaymentsUpdatedBetween(token, new Date(mid.getTime() + 1), end, depth + 1);
+      const left = await fetchPaymentsUpdatedBetween(token, begin, mid, depth + 1, range);
+      const right = await fetchPaymentsUpdatedBetween(token, new Date(mid.getTime() + 1), end, depth + 1, range);
       return dedupeById([...left, ...right]);
     }
 
