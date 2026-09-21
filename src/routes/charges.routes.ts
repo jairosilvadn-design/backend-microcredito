@@ -48,7 +48,16 @@ function idempotencyKey(req: FastifyRequest): string {
 
 function handleError(err: unknown, reply: FastifyReply, req: FastifyRequest) {
   if (err instanceof z.ZodError) {
-    return reply.code(400).send({ error: 'validation_error', details: err.flatten().fieldErrors });
+    const nomes: Record<string, string> = {
+      merchantId: 'selecione um comerciante', amount: 'valor inválido', title: 'título do link (mín. 3 letras)',
+      payerEmail: 'e-mail do pagador inválido', payerCpf: 'CPF do pagador com 11 dígitos',
+    };
+    const campos = Object.keys(err.flatten().fieldErrors);
+    return reply.code(400).send({
+      error: 'validation_error',
+      message: `Verifique: ${campos.map((c) => nomes[c] ?? c).join(', ')}`,
+      details: err.flatten().fieldErrors,
+    });
   }
   if (err instanceof ChargeError) {
     if (err.httpStatus >= 500) req.log.error({ err }, 'Falha ao criar cobrança');

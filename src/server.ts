@@ -7,6 +7,7 @@ import { registerCors } from './plugins/cors';
 import { oauthRoutes } from './routes/oauth.routes';
 import { chargesRoutes } from './routes/charges.routes';
 import { dashboardRoutes } from './routes/dashboard.routes';
+import { merchantsRoutes } from './routes/merchants.routes';
 import { webhookRoutes } from './routes/webhook.routes';
 import { scheduleTokenRefresh } from './jobs/refresh-tokens.job';
 import { scheduleWebhookRetry } from './jobs/webhook-retry.job';
@@ -40,6 +41,7 @@ async function main() {
   await app.register(webhookRoutes);
   await app.register(chargesRoutes);
   await app.register(dashboardRoutes);
+  await app.register(merchantsRoutes);
 
   if (env.ENABLE_JOBS) {
     scheduleTokenRefresh(app.log);
