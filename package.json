@@ -1,6 +1,6 @@
 {
   "name": "microcredito-backend",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -10,7 +10,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "gen:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
-    "test": "tsx tests/audit.test.ts && tsx tests/merchants.test.ts && tsx tests/analysis.test.ts && tsx tests/credit.test.ts && tsx tests/resumo.test.ts && tsx tests/tesouraria.test.ts"
+    "test": "tsx tests/audit.test.ts && tsx tests/merchants.test.ts && tsx tests/analysis.test.ts && tsx tests/credit.test.ts && tsx tests/resumo.test.ts && tsx tests/tesouraria.test.ts && tsx tests/cors.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.1.0",

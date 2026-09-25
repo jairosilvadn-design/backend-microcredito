@@ -20,7 +20,9 @@ export async function registerCors(app: FastifyInstance) {
       if (allowed.has(origin) || previewRegex?.test(origin)) return cb(null, true);
       return cb(null, false); // sem headers CORS -> o navegador bloqueia
     },
-    methods: ['GET', 'POST', 'OPTIONS'],
+    // PUT e PATCH são usados para salvar configurações, níveis e cadastros.
+    // Faltando um método aqui, o navegador bloqueia o envio antes de sair.
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
     credentials: false,
     maxAge: 600, // cache do preflight por 10 min
