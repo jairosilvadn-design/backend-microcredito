@@ -31,12 +31,23 @@ export async function requireOperator(req: FastifyRequest, reply: FastifyReply) 
 
     const firebase = payload.firebase as { sign_in_provider?: string } | undefined;
     const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : undefined;
+    const provedor = firebase?.sign_in_provider ?? '';
 
-    if (!payload.sub || !email || payload.email_verified !== true) {
-      return reply.code(401).send({ error: 'unauthorized' });
+    if (!payload.sub || !email) return reply.code(401).send({ error: 'unauthorized' });
+
+    // Entrada pelo Google ou por e-mail e senha. Em ambos os casos, o e-mail
+    // ainda precisa estar cadastrado como operador (a checagem abaixo).
+    const PROVEDORES = ['google.com', 'password'];
+    if (!PROVEDORES.includes(provedor)) {
+      return reply.code(403).send({ error: 'provider_not_allowed', message: 'Forma de login não permitida.' });
     }
-    if (firebase?.sign_in_provider !== 'google.com') {
-      return reply.code(403).send({ error: 'provider_not_allowed' });
+    // No Google o e-mail já vem verificado pela própria conta. No e-mail e senha,
+    // exigimos a confirmação por e-mail para ninguém entrar com endereço alheio.
+    if (provedor === 'password' && payload.email_verified !== true) {
+      return reply.code(403).send({
+        error: 'email_not_verified',
+        message: 'Confirme seu e-mail pelo link que enviamos antes de entrar.',
+      });
     }
 
     // Login Google não basta: o e-mail precisa estar na lista de operadores.

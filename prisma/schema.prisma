@@ -396,3 +396,301 @@ model JobRun {
 
   @@index([job, startedAt])
 }
+
+// =====================================================================
+// MÓDULO DE MICROCRÉDITO PRÓPRIO (capital próprio, cobrança manual)
+// Fluxo: lead -> proposta -> link de assinatura -> aceite -> liberação
+//        -> parcelas diárias/semanais -> baixa manual -> quitação -> subida de nível
+// =====================================================================
+
+enum PersonType {
+  PF
+  PJ
+}
+
+enum BorrowerStatus {
+  LEAD            // cadastrado, ainda sem contrato
+  ATIVO           // com contrato em andamento
+  EM_DIA          // quitou e está apto a novo ciclo
+  ATRASADO
+  INADIMPLENTE
+  BLOQUEADO
+}
+
+enum CreditFrequency {
+  DAILY
+  WEEKLY
+}
+
+enum CreditContractStatus {
+  DRAFT              // proposta montada pelo operador
+  AWAITING_SIGNATURE // link enviado ao cliente
+  SIGNED             // cliente assinou; aguardando liberação do dinheiro
+  ACTIVE             // dinheiro entregue, parcelas correndo
+  PAID
+  DEFAULTED
+  CANCELLED
+}
+
+enum CreditInstallmentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+  WAIVED
+}
+
+enum DocumentKind {
+  DOC_FRONT       // documento (frente)
+  DOC_BACK
+  DOC_SELFIE      // selfie segurando o documento
+  ADDRESS_PROOF   // comprovante de endereço
+  OTHER
+}
+
+enum NotificationKind {
+  LEMBRETE
+  ATRASO
+  BOAS_VINDAS
+  QUITACAO
+  PROPOSTA
+}
+
+enum NotificationStatus {
+  PENDENTE
+  ENVIADA
+  DISPENSADA
+}
+
+/// Escada de limites: cada nível libera um teto maior e pode ter taxa menor.
+model CreditLevel {
+  id            String   @id @default(uuid()) @db.Uuid
+  rank          Int      @unique          // 1, 2, 3...
+  name          String
+  maxPrincipal  Decimal  @db.Decimal(14, 2)
+  ratePercent   Decimal  @db.Decimal(6, 2) // % sobre o valor emprestado no ciclo
+  maxTerm       Int                        // nº máximo de parcelas
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  borrowers     Borrower[]
+  contracts     CreditContract[]
+}
+
+/// Tomador: comerciante PF (CPF) ou PJ (CNPJ).
+model Borrower {
+  id                 String         @id @default(uuid()) @db.Uuid
+  personType         PersonType
+  document           String         @unique
+  name               String
+  tradeName          String?
+  birthDate          DateTime?      @db.Date
+  whatsapp           String
+  email              String?
+  pixKey             String?
+  pixKeyType         String?
+
+  addressStreet      String?
+  addressNumber      String?
+  addressDistrict    String?
+  addressCity        String
+  addressState       String         @db.Char(2)
+  addressZip         String?
+
+  // Perfil do negócio: base do cálculo de capacidade quando não há extrato
+  segment            String         // chave da tabela de segmentos
+  segmentOther       String?
+  businessMonths     Int            @default(0)  // tempo de atividade
+  openDaysPerWeek    Int            @default(6)
+  declaredDailySales Decimal?       @db.Decimal(14, 2)
+  ownsPoint          Boolean        @default(false) // ponto próprio (não alugado)
+  referredBy         String?
+
+  levelId            String?        @db.Uuid
+  level              CreditLevel?   @relation(fields: [levelId], references: [id])
+  status             BorrowerStatus @default(LEAD)
+  score              Int            @default(0)
+  cyclesPaid         Int            @default(0)
+  notes              String?
+  consentAt          DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  contracts          CreditContract[]
+  analyses           StatementAnalysis[]
+  documents          BorrowerDocument[]
+  notifications      CreditNotification[]
+
+  @@index([status])
+  @@index([name])
+}
+
+/// Análise de extrato (opcional): CSV/OFX enviado pelo operador.
+model StatementAnalysis {
+  id              String   @id @default(uuid()) @db.Uuid
+  borrowerId      String   @db.Uuid
+  borrower        Borrower @relation(fields: [borrowerId], references: [id], onDelete: Cascade)
+  fileName        String
+  source          String   // CSV | OFX | MANUAL
+  periodFrom      DateTime @db.Date
+  periodTo        DateTime @db.Date
+  creditsTotal    Decimal  @db.Decimal(14, 2)
+  debitsTotal     Decimal  @db.Decimal(14, 2)
+  creditsCount    Int
+  daysWithCredit  Int
+  avgDailyCredits Decimal  @db.Decimal(14, 2)
+  medianDaily     Decimal  @db.Decimal(14, 2)
+  suggestedDaily  Decimal  @db.Decimal(14, 2)
+  summary         Json
+  createdAt       DateTime @default(now())
+
+  @@index([borrowerId, createdAt])
+}
+
+model CreditContract {
+  id                 String               @id @default(uuid()) @db.Uuid
+  number             String               @unique
+  borrowerId         String               @db.Uuid
+  borrower           Borrower             @relation(fields: [borrowerId], references: [id])
+  levelId            String?              @db.Uuid
+  level              CreditLevel?         @relation(fields: [levelId], references: [id])
+
+  principal          Decimal              @db.Decimal(14, 2)
+  ratePercent        Decimal              @db.Decimal(6, 2)
+  totalPayable       Decimal              @db.Decimal(14, 2)
+  frequency          CreditFrequency      @default(DAILY)
+  installmentsCount  Int
+  installmentAmount  Decimal              @db.Decimal(14, 2)
+  firstDueDate       DateTime             @db.Date
+  businessDaysOnly   Boolean              @default(true)
+  lateFeePercent     Decimal              @default(2) @db.Decimal(5, 2)   // multa (CDC: até 2%)
+  lateDailyPercent   Decimal              @default(0.033) @db.Decimal(6, 3) // juros de mora ao dia (~1% a.m.)
+  cetMonthly         Decimal              @db.Decimal(7, 4)
+  netToBorrower      Decimal              @default(0) @db.Decimal(14, 2) // valor líquido entregue
+  costsTotal         Decimal              @default(0) @db.Decimal(14, 2) // IOF + tarifas
+  costsBreakdown     Json?                                               // demonstrativo linha a linha
+  purpose            String?
+
+  status             CreditContractStatus @default(DRAFT)
+  outstanding        Decimal              @db.Decimal(14, 2)
+  contractText       String                                    // texto congelado no momento do envio
+  contractHash       String                                    // SHA-256 do texto assinado
+  receivePixKey      String?                                    // chave Pix do cliente (para o repasse)
+  payToPixKey        String                                     // chave Pix da empresa (para as parcelas)
+  disbursedAt        DateTime?
+  disbursedProof     String?
+  signedAt           DateTime?
+  paidAt             DateTime?
+  defaultedAt        DateTime?
+  createdById        String?              @db.Uuid
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  signature          ContractSignature?
+  installments       CreditInstallment[]
+  documents          BorrowerDocument[]
+  notifications      CreditNotification[]
+
+  @@index([status])
+  @@index([borrowerId, createdAt])
+}
+
+/// Link público de assinatura + prova do aceite.
+model ContractSignature {
+  id               String         @id @default(uuid()) @db.Uuid
+  contractId       String         @unique @db.Uuid
+  contract         CreditContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  token            String         @unique
+  expiresAt        DateTime
+  openedAt         DateTime?
+  acceptedAt       DateTime?
+  signerName       String?
+  signerDocument   String?
+  signerIp         String?
+  signerUserAgent  String?
+  signerPixKey     String?
+  signerPixKeyType String?
+  typedSignature   String?        // nome completo digitado como assinatura
+  createdAt        DateTime       @default(now())
+}
+
+/// Arquivos enviados pelo cliente (documento, selfie com documento, comprovante).
+model BorrowerDocument {
+  id          String          @id @default(uuid()) @db.Uuid
+  borrowerId  String          @db.Uuid
+  borrower    Borrower        @relation(fields: [borrowerId], references: [id], onDelete: Cascade)
+  contractId  String?         @db.Uuid
+  contract    CreditContract? @relation(fields: [contractId], references: [id])
+  kind        DocumentKind
+  mimeType    String
+  sizeBytes   Int
+  data        Bytes
+  uploadedIp  String?
+  createdAt   DateTime        @default(now())
+
+  @@index([borrowerId, kind])
+}
+
+model CreditInstallment {
+  id           String                  @id @default(uuid()) @db.Uuid
+  contractId   String                  @db.Uuid
+  contract     CreditContract          @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  sequence     Int
+  dueDate      DateTime                @db.Date
+  amountDue    Decimal                 @db.Decimal(14, 2)
+  amountPaid   Decimal                 @default(0) @db.Decimal(14, 2)
+  lateCharge   Decimal                 @default(0) @db.Decimal(14, 2)
+  status       CreditInstallmentStatus @default(PENDING)
+  paidAt       DateTime?
+
+  payments     CreditPayment[]
+  notifications CreditNotification[]
+
+  @@unique([contractId, sequence])
+  @@index([dueDate, status])
+}
+
+/// Baixa manual feita pelo operador.
+model CreditPayment {
+  id             String            @id @default(uuid()) @db.Uuid
+  installmentId  String            @db.Uuid
+  installment    CreditInstallment @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+  amount         Decimal           @db.Decimal(14, 2)
+  paidAt         DateTime
+  method         String            // PIX | DINHEIRO | TRANSFERENCIA | OUTRO
+  receiptRef     String?
+  note           String?
+  operatorId     String?           @db.Uuid
+  createdAt      DateTime          @default(now())
+
+  @@index([paidAt])
+}
+
+/// Régua de cobrança: mensagem pronta para o operador enviar no WhatsApp.
+model CreditNotification {
+  id             String             @id @default(uuid()) @db.Uuid
+  borrowerId     String             @db.Uuid
+  borrower       Borrower           @relation(fields: [borrowerId], references: [id], onDelete: Cascade)
+  contractId     String?            @db.Uuid
+  contract       CreditContract?    @relation(fields: [contractId], references: [id])
+  installmentId  String?            @db.Uuid
+  installment    CreditInstallment? @relation(fields: [installmentId], references: [id])
+  kind           NotificationKind
+  referenceDate  DateTime           @db.Date
+  message        String
+  status         NotificationStatus @default(PENDENTE)
+  sentAt         DateTime?
+  operatorId     String?            @db.Uuid
+  createdAt      DateTime           @default(now())
+
+  @@unique([installmentId, kind, referenceDate])
+  @@index([status, referenceDate])
+}
+
+/// Configurações da operação editáveis no painel (chave Pix, regime, limites).
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
