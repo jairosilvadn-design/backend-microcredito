@@ -28,6 +28,9 @@ export interface OperationSettings {
   // Responsável técnico (aparece no contrato só se preenchido)
   legalReviewer?: string;    // nome do advogado/escritório
   legalReviewerOab?: string; // OAB
+
+  /** Postura da operação: AUTO deixa o sistema decidir pelo tamanho da carteira. */
+  modoOperacao: 'AUTO' | 'ARRANCADA' | 'EQUILIBRADO' | 'CONSERVADOR';
 }
 
 export const DEFAULT_SETTINGS: OperationSettings = {
@@ -50,6 +53,7 @@ export const DEFAULT_SETTINGS: OperationSettings = {
   tacPercent: 0,
   otherCosts: 0,
   costsMode: 'DEDUZIR',
+  modoOperacao: 'AUTO',
 };
 
 const KEY = 'operation';

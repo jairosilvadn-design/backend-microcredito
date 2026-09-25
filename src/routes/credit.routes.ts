@@ -10,6 +10,9 @@ import { quote as buildQuote, lateCharge, computeCosts } from '../services/credi
 import { parseStatement, summarize } from '../services/credit/statement.service';
 import { buildContractText, buildMessage, hashContract, shortHash, waLink } from '../services/credit/contract.service';
 import { canLendTo, ensureLevels, getSettings, saveSettings } from '../services/credit/settings.service';
+import {
+  MODOS, PADROES, limiteParaCliente, modoPara, projetarCaixa, recomendacoes, saudeDaCarteira, situacaoCaixa,
+} from '../services/credit/tesouraria.service';
 import { env } from '../config/env';
 
 const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
@@ -83,7 +86,95 @@ const quoteSchema = z.object({
   ratePercent: z.coerce.number().min(0).max(100).optional(),
   levelId: uuid.optional(),
   purpose: z.string().trim().max(200).optional(),
+  ignorarLimite: z.boolean().default(false), // o operador pode assumir o risco
 });
+
+/** Soma de tudo que entrou e saiu do caixa. */
+async function saldoDoCaixa(): Promise<number> {
+  const r = await prisma.cashEntry.aggregate({ _sum: { amount: true } });
+  return Number(r._sum.amount ?? 0);
+}
+
+/** Retrato completo da operação: caixa, saúde, projeção e o que fazer hoje. */
+async function retratoDaOperacao() {
+  const hoje = ymdSaoPaulo();
+  const [saldo, contratos, parcelas, aguardando, assinados, prontos, ultimaLiberacao] = await Promise.all([
+    saldoDoCaixa(),
+    prisma.creditContract.findMany({
+      where: { status: { in: ['ACTIVE', 'DEFAULTED'] } },
+      select: { principal: true, totalPayable: true, outstanding: true, disbursedAt: true },
+    }),
+    prisma.creditInstallment.findMany({
+      where: { contract: { status: { in: ['ACTIVE', 'DEFAULTED'] } }, status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] } },
+      select: { dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true },
+    }),
+    prisma.creditContract.count({ where: { status: 'AWAITING_SIGNATURE' } }),
+    prisma.creditContract.count({ where: { status: 'SIGNED' } }),
+    prisma.borrower.count({ where: { status: 'EM_DIA', contracts: { none: { status: { in: ['DRAFT', 'AWAITING_SIGNATURE', 'SIGNED', 'ACTIVE'] } } } } }),
+    prisma.cashEntry.findFirst({ where: { kind: 'LIBERACAO' }, orderBy: { happenedAt: 'desc' } }),
+  ]);
+
+  // Capital na rua = parte do principal ainda não devolvida (proporcional ao pago)
+  let principalNaRua = 0, carteiraTotal = 0, liberadoTotal = 0, jurosRecebidos = 0;
+  for (const c of contratos) {
+    const principal = num(c.principal), total = num(c.totalPayable), aberto = num(c.outstanding);
+    const fatia = total > 0 ? principal / total : 1;
+    principalNaRua += aberto * fatia;
+    carteiraTotal += aberto;
+    liberadoTotal += principal;
+    jurosRecebidos += (total - aberto) * (1 - fatia);
+  }
+
+  let atrasoAte30 = 0, atrasoMais30 = 0, parcelasAtrasadas = 0;
+  const entradasPorDia: Record<string, number> = {};
+  for (const i of parcelas) {
+    const dia = dbDateToYmd(i.dueDate);
+    const falta = num(i.amountDue) + num(i.lateCharge) - num(i.amountPaid);
+    const diasAtraso = Math.round((Date.parse(`${hoje}T12:00:00Z`) - Date.parse(`${dia}T12:00:00Z`)) / 86400_000);
+    if (diasAtraso > 0) {
+      parcelasAtrasadas++;
+      if (diasAtraso > 30) atrasoMais30 += falta; else atrasoAte30 += falta;
+      entradasPorDia[hoje] = (entradasPorDia[hoje] ?? 0) + falta; // atrasada: pode entrar hoje
+    } else {
+      entradasPorDia[dia] = (entradasPorDia[dia] ?? 0) + falta;
+    }
+  }
+
+  // O modo depende do tamanho da carteira: carteira pequena roda mais solta.
+  const settings = await getSettings();
+  const modo = modoPara(saldo + principalNaRua, settings.modoOperacao);
+  const padroes = modo.padroes;
+
+  const caixa = situacaoCaixa({ saldoCaixa: saldo, principalNaRua, aReceberProximos7Dias: 0, padroes });
+  const saude = saudeDaCarteira({
+    padroes,
+    carteiraTotal, emAtrasoAte30: atrasoAte30, emAtrasoMais30: atrasoMais30, liberadoTotal, jurosRecebidos,
+    diasOperando: Math.max(1, contratos.reduce((mx, c) => {
+      if (!c.disbursedAt) return mx;
+      return Math.max(mx, Math.round((Date.now() - c.disbursedAt.getTime()) / 86400_000));
+    }, 0)),
+    saldoCaixa: saldo,
+  });
+
+  const dias = Array.from({ length: 60 }, (_, k) => addDaysYmd(hoje, k));
+  const projecao = projetarCaixa({
+    saldoHoje: saldo, reserva: caixa.reservaGuardada, entradasPorDia, dias, contratoMinimo: padroes.contratoMinimo,
+  });
+
+  const diasCaixaParado = ultimaLiberacao
+    ? Math.round((Date.now() - ultimaLiberacao.happenedAt.getTime()) / 86400_000)
+    : 0;
+
+  const clientesAtivos = await prisma.borrower.count({ where: { status: { in: ['ATIVO', 'ATRASADO', 'INADIMPLENTE'] } } });
+  const tarefas = recomendacoes({
+    padroes,
+    caixa, saude, projecao, clientesAtivos, clientesProntosParaSubir: prontos,
+    parcelasAtrasadas, contratosAguardandoAssinatura: aguardando, contratosAssinadosSemLiberar: assinados,
+    diasCaixaParado: caixa.disponivelParaEmprestar >= padroes.contratoMinimo ? diasCaixaParado : 0,
+  });
+
+  return { caixa, saude, projecao, tarefas, principalNaRua, carteiraTotal, clientesAtivos, parcelasAtrasadas, modo, padroes };
+}
 
 // ---------------------------------------------------------------------------
 export async function creditRoutes(app: FastifyInstance) {
@@ -109,6 +200,7 @@ export async function creditRoutes(app: FastifyInstance) {
       settings,
       levels: levels.map((l) => ({ ...l, maxPrincipal: money2(l.maxPrincipal), ratePercent: money2(l.ratePercent) })),
       segments: SEGMENTS,
+      modos: MODOS,
     };
   });
 
@@ -136,6 +228,7 @@ export async function creditRoutes(app: FastifyInstance) {
       costsMode: z.enum(['DEDUZIR', 'FINANCIAR']).optional(),
       legalReviewer: z.string().trim().max(200).optional(),
       legalReviewerOab: z.string().trim().max(40).optional(),
+      modoOperacao: z.enum(['AUTO', 'ARRANCADA', 'EQUILIBRADO', 'CONSERVADOR']).optional(),
     }).parse(req.body);
     const saved = await saveSettings(body);
     await audit(req, 'credit.settings.update', 'AppSetting', 'operation', body);
@@ -305,7 +398,23 @@ export async function creditRoutes(app: FastifyInstance) {
     });
 
     const suggestion = suggestPrincipal({ capacity, frequency: body.frequency, installments: body.installments, ratePercent: rate, levelMax });
-    const principal = body.principal ?? suggestion.principal;
+
+    // Regra da casa: além da capacidade do cliente, respeita caixa e concentração.
+    const retrato = await retratoDaOperacao();
+    const jaComEle = await prisma.creditContract.aggregate({
+      _sum: { outstanding: true },
+      where: { borrowerId: b.id, status: { in: ['ACTIVE', 'DEFAULTED'] } },
+    });
+    const limite = limiteParaCliente({
+      capacidadeCliente: suggestion.principal || levelMax,
+      tetoDoNivel: levelMax,
+      patrimonio: retrato.caixa.patrimonio,
+      jaEmprestadoAoCliente: num(jaComEle._sum.outstanding),
+      disponivelParaEmprestar: retrato.caixa.disponivelParaEmprestar,
+      padroes: retrato.padroes,
+    });
+
+    const principal = body.principal ?? limite.valorSugerido;
     if (principal <= 0) {
       return reply.code(422).send({ error: 'no_capacity', message: 'A capacidade estimada não cobre nenhum valor com esse prazo. Aumente o número de parcelas ou revise os dados do negócio.' });
     }
@@ -327,7 +436,18 @@ export async function creditRoutes(app: FastifyInstance) {
       alerts.push(`Atenção ao explicar: o cliente contrata ${real(principal)} mas recebe ${real(costs.netToBorrower)} na conta, porque ${real(costs.total)} são custos e tributos.`);
     }
 
-    return { quote: q, capacity, suggestion, level: level ? { id: level.id, rank: level.rank, name: level.name, maxPrincipal: money2(level.maxPrincipal), ratePercent: money2(level.ratePercent) } : null, alerts };
+    if (!retrato.saude.podeCrescer) {
+      alerts.unshift(`${retrato.saude.frases[0]} Se liberar mesmo assim, faça por sua conta e risco.`);
+    }
+    if (body.principal && body.principal > limite.valorSugerido && limite.valorSugerido > 0) {
+      alerts.unshift(`O sistema recomenda no máximo ${limite.valorSugerido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} para este cliente hoje: ${limite.motivo}`);
+    }
+
+    return {
+      quote: q, capacity, suggestion, limite, caixa: retrato.caixa, saude: retrato.saude, modo: retrato.modo,
+      level: level ? { id: level.id, rank: level.rank, name: level.name, maxPrincipal: money2(level.maxPrincipal), ratePercent: money2(level.ratePercent) } : null,
+      alerts,
+    };
   });
 
   // ---------------------------------------------------------- contratos
@@ -363,6 +483,29 @@ export async function creditRoutes(app: FastifyInstance) {
     if (costs.netToBorrower <= 0) {
       return reply.code(422).send({ error: 'costs_exceed', message: 'Os custos configurados consomem todo o valor do contrato. Revise as tarifas em Configurações.' });
     }
+    // Trava de caixa e concentração: evita emprestar o que vai fazer falta.
+    const retrato = await retratoDaOperacao();
+    const jaComEle = await prisma.creditContract.aggregate({
+      _sum: { outstanding: true },
+      where: { borrowerId: b.id, status: { in: ['ACTIVE', 'DEFAULTED'] } },
+    });
+    const limite = limiteParaCliente({
+      capacidadeCliente: body.principal, tetoDoNivel: levelMax, patrimonio: retrato.caixa.patrimonio,
+      jaEmprestadoAoCliente: num(jaComEle._sum.outstanding), disponivelParaEmprestar: retrato.caixa.disponivelParaEmprestar,
+      padroes: retrato.padroes,
+    });
+    if (!body.ignorarLimite && body.principal > limite.valorSugerido) {
+      return reply.code(422).send({
+        error: 'limite_operacao',
+        message: `${limite.motivo} Reduza o valor ou marque a opção de assumir o risco.`,
+        sugerido: limite.valorSugerido,
+        caixa: retrato.caixa,
+      });
+    }
+    if (body.ignorarLimite && body.principal > limite.valorSugerido) {
+      await audit(req, 'credit.limit.override', 'Borrower', b.id, { pedido: body.principal, sugerido: limite.valorSugerido, motivo: limite.motivo });
+    }
+
     const q = buildQuote({ principal: body.principal, ratePercent: rate, installments: body.installments, frequency: body.frequency, firstDueDate: body.firstDueDate, openDaysPerWeek: b.openDaysPerWeek, costs });
     const number = await nextContractNumber();
     const issuedAt = new Date();
@@ -519,6 +662,14 @@ export async function creditRoutes(app: FastifyInstance) {
         data: { status: 'ACTIVE', disbursedAt: new Date(), disbursedProof: body.proof ?? null, firstDueDate: ymdToDbDate(q.firstDueDate), outstanding: D(q.totalPayable) },
       });
       await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'ATIVO' } });
+      // Saiu dinheiro do caixa: registra o valor que foi de fato para o cliente.
+      await tx.cashEntry.create({
+        data: {
+          kind: 'LIBERACAO', amount: D(-(num(c.netToBorrower) > 0 ? num(c.netToBorrower) : num(c.principal))),
+          happenedAt: new Date(), description: `Liberação do contrato ${c.number} — ${c.borrower.name}`,
+          contractId: c.id, borrowerId: c.borrowerId, operatorId: req.operator!.id,
+        },
+      });
       await tx.creditNotification.create({
         data: {
           borrowerId: c.borrowerId, contractId: id, kind: 'BOAS_VINDAS', referenceDate: ymdToDbDate(ymdSaoPaulo()),
@@ -574,6 +725,15 @@ export async function creditRoutes(app: FastifyInstance) {
       await tx.creditInstallment.update({
         where: { id },
         data: { amountPaid: newPaid, status: settled ? 'PAID' : 'PARTIAL', paidAt: settled ? paidAt : null },
+      });
+
+      // Entrou dinheiro no caixa.
+      await tx.cashEntry.create({
+        data: {
+          kind: 'RECEBIMENTO', amount, happenedAt: paidAt,
+          description: `Parcela ${inst.sequence} do contrato ${inst.contract.number} — ${inst.contract.borrower.name}`,
+          contractId: inst.contractId, borrowerId: inst.contract.borrowerId, operatorId: req.operator!.id,
+        },
       });
 
       const contract = await tx.creditContract.findUniqueOrThrow({ where: { id: inst.contractId }, include: { installments: true } });
@@ -795,6 +955,62 @@ export async function creditRoutes(app: FastifyInstance) {
       meses,
       atrasados: atrasados.sort((a, b) => Number(b.dias) - Number(a.dias)).slice(0, 10),
     };
+  });
+
+  // ----------------------------------------------------------------- caixa
+  /** Painel do gestor: caixa, saúde da carteira, projeção e o que fazer hoje. */
+  app.get('/api/credito/gestor', async () => {
+    const r = await retratoDaOperacao();
+    return {
+      caixa: r.caixa,
+      saude: r.saude,
+      tarefas: r.tarefas,
+      projecao: { ...r.projecao, linha: r.projecao.linha.slice(0, 30) },
+      carteira: { principalNaRua: r.principalNaRua.toFixed(2), aReceber: r.carteiraTotal.toFixed(2), clientesAtivos: r.clientesAtivos, parcelasAtrasadas: r.parcelasAtrasadas },
+      modo: r.modo,
+      padroes: r.padroes,
+    };
+  });
+
+  /** Livro-caixa: extrato de tudo que entrou e saiu. */
+  app.get('/api/credito/caixa', async (req) => {
+    const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(200).default(60) }).parse(req.query);
+    const [entradas, saldo, porTipo] = await Promise.all([
+      prisma.cashEntry.findMany({ orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }], take: limit }),
+      saldoDoCaixa(),
+      prisma.cashEntry.groupBy({ by: ['kind'], _sum: { amount: true } }),
+    ]);
+    const retrato = await retratoDaOperacao();
+    return {
+      saldo: saldo.toFixed(2),
+      situacao: retrato.caixa,
+      totais: Object.fromEntries(porTipo.map((t) => [t.kind, money2(t._sum.amount) ?? '0.00'])),
+      lancamentos: entradas.map((e) => ({
+        id: e.id, kind: e.kind, amount: money2(e.amount), happenedAt: e.happenedAt,
+        description: e.description, contractId: e.contractId,
+      })),
+    };
+  });
+
+  /** Aporte, retirada ou despesa, lançados à mão. */
+  app.post('/api/credito/caixa', async (req) => {
+    const body = z.object({
+      kind: z.enum(['APORTE', 'RETIRADA', 'DESPESA', 'AJUSTE']),
+      amount: z.coerce.number().positive().max(10_000_000),
+      description: z.string().trim().min(3).max(200),
+      happenedAt: z.string().refine(isValidYmd).optional(),
+    }).parse(req.body);
+
+    const sinal = body.kind === 'APORTE' ? 1 : body.kind === 'AJUSTE' ? 1 : -1;
+    const entrada = await prisma.cashEntry.create({
+      data: {
+        kind: body.kind, amount: D(body.amount * sinal), description: body.description,
+        happenedAt: body.happenedAt ? new Date(`${body.happenedAt}T12:00:00.000-03:00`) : new Date(),
+        operatorId: req.operator!.id,
+      },
+    });
+    await audit(req, `cash.${body.kind.toLowerCase()}`, 'CashEntry', entrada.id, { amount: body.amount, description: body.description });
+    return { ok: true, saldo: (await saldoDoCaixa()).toFixed(2) };
   });
 
   /** Arquivo enviado pelo cliente (documento/selfie/comprovante). */

@@ -694,3 +694,32 @@ model AppSetting {
   value     Json
   updatedAt DateTime @updatedAt
 }
+
+// =====================================================================
+// CAIXA E GESTÃO DA CARTEIRA
+// Cada real que entra ou sai vira um lançamento. É o livro-caixa do negócio.
+// =====================================================================
+
+enum CashKind {
+  APORTE        // dinheiro que você colocou
+  RETIRADA      // dinheiro que você tirou
+  LIBERACAO     // saiu para o cliente
+  RECEBIMENTO   // parcela paga
+  DESPESA       // custo da operação
+  AJUSTE        // correção manual
+}
+
+model CashEntry {
+  id          String    @id @default(uuid()) @db.Uuid
+  kind        CashKind
+  amount      Decimal   @db.Decimal(14, 2) // positivo entra, negativo sai
+  happenedAt  DateTime
+  description String
+  contractId  String?   @db.Uuid
+  borrowerId  String?   @db.Uuid
+  operatorId  String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+
+  @@index([happenedAt])
+  @@index([kind])
+}
