@@ -118,6 +118,13 @@ export interface QuoteInput {
   firstDueDate: string;
   openDaysPerWeek?: number;
   costs?: CostBreakdown;     // quando houver IOF/tarifas
+  /**
+   * Cronograma combinado com o cliente, parcela a parcela.
+   * Quando vem preenchido, manda nele: as datas e os valores são os acertados
+   * na conversa, e não os gerados automaticamente. É o caso de "me paga 50 na
+   * sexta e 30 na quarta", ou de misturar dias e semanas no mesmo contrato.
+   */
+  cronograma?: Array<{ dueDate: string; amount: number }>;
 }
 
 export interface Quote {
@@ -131,6 +138,8 @@ export interface Quote {
   installmentAmount: number;
   lastInstallmentAmount: number;
   frequency: Frequency;
+  /** true quando as datas e valores foram acertados à mão com o cliente. */
+  combinado: boolean;
   dueDates: string[];
   amounts: number[];
   firstDueDate: string;
@@ -141,9 +150,13 @@ export interface Quote {
 
 export function quote(i: QuoteInput): Quote {
   const base = i.costs ? i.costs.financedAmount : i.principal;
-  const total = round2(base * (1 + i.ratePercent / 100));
-  const dueDates = buildSchedule(i.firstDueDate, i.installments, i.frequency, i.openDaysPerWeek ?? 6);
-  const amounts = splitAmounts(total, i.installments);
+  const combinado = i.cronograma?.length ? [...i.cronograma].sort((a, b) => a.dueDate.localeCompare(b.dueDate)) : null;
+
+  const total = combinado
+    ? round2(combinado.reduce((soma, p) => soma + p.amount, 0))
+    : round2(base * (1 + i.ratePercent / 100));
+  const dueDates = combinado ? combinado.map((p) => p.dueDate) : buildSchedule(i.firstDueDate, i.installments, i.frequency, i.openDaysPerWeek ?? 6);
+  const amounts = combinado ? combinado.map((p) => round2(p.amount)) : splitAmounts(total, i.installments);
   // O CET é calculado sobre o que o cliente REALMENTE recebe: é assim que o
   // custo das tarifas aparece na taxa, como exige a regra dos bancos.
   const liquido = i.costs ? i.costs.netToBorrower : i.principal;
@@ -156,10 +169,11 @@ export function quote(i: QuoteInput): Quote {
     ratePercent: i.ratePercent,
     totalPayable: total,
     interest: round2(total - i.principal),
-    installments: i.installments,
+    installments: amounts.length,
     installmentAmount: amounts[0]!,
     lastInstallmentAmount: amounts[amounts.length - 1]!,
     frequency: i.frequency,
+    combinado: Boolean(combinado),
     dueDates,
     amounts,
     firstDueDate: dueDates[0]!,

@@ -87,7 +87,22 @@ const quoteSchema = z.object({
   levelId: uuid.optional(),
   purpose: z.string().trim().max(200).optional(),
   ignorarLimite: z.boolean().default(false), // o operador pode assumir o risco
+  /** Datas e valores acertados na conversa com o cliente. */
+  cronograma: z.array(z.object({
+    dueDate: z.string().refine(isValidYmd),
+    amount: z.coerce.number().positive().max(100_000),
+  })).min(1).max(120).optional(),
 });
+
+/** Confere o cronograma combinado: datas em ordem, sem repetição e no futuro. */
+function conferirCronograma(lista: Array<{ dueDate: string; amount: number }>): string | null {
+  const hoje = ymdSaoPaulo();
+  const datas = lista.map((p) => p.dueDate);
+  if (new Set(datas).size !== datas.length) return 'Há duas parcelas na mesma data. Junte-as numa só ou mude uma das datas.';
+  if (datas.some((d) => d < hoje)) return 'Há parcela com data que já passou. Use de hoje em diante.';
+  if (lista.some((p) => p.amount <= 0)) return 'Toda parcela precisa ter valor maior que zero.';
+  return null;
+}
 
 /** Soma de tudo que entrou e saiu do caixa. */
 async function saldoDoCaixa(): Promise<number> {
@@ -95,10 +110,27 @@ async function saldoDoCaixa(): Promise<number> {
   return Number(r._sum.amount ?? 0);
 }
 
-/** Retrato completo da operação: caixa, saúde, projeção e o que fazer hoje. */
+/**
+ * O retrato da operação faz várias contas no banco. Como ele é consultado por
+ * quase toda tela, guardamos o resultado por alguns segundos. Qualquer coisa
+ * que mexa em dinheiro (baixa, liberação, aporte) limpa esse cache na hora,
+ * então o número nunca aparece desatualizado para o operador.
+ */
+let retratoCache: { em: number; dados: Awaited<ReturnType<typeof calcularRetrato>> } | null = null;
+const CACHE_MS = 20_000;
+
+export function limparCacheDoRetrato() { retratoCache = null; }
+
 async function retratoDaOperacao() {
+  if (retratoCache && Date.now() - retratoCache.em < CACHE_MS) return retratoCache.dados;
+  const dados = await calcularRetrato();
+  retratoCache = { em: Date.now(), dados };
+  return dados;
+}
+
+async function calcularRetrato() {
   const hoje = ymdSaoPaulo();
-  const [saldo, contratos, parcelas, aguardando, assinados, prontos, ultimaLiberacao] = await Promise.all([
+  const [saldo, contratos, parcelas, aguardando, pixAEnviar, prontos, ultimaLiberacao] = await Promise.all([
     saldoDoCaixa(),
     prisma.creditContract.findMany({
       where: { status: { in: ['ACTIVE', 'DEFAULTED'] } },
@@ -109,7 +141,8 @@ async function retratoDaOperacao() {
       select: { dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true },
     }),
     prisma.creditContract.count({ where: { status: 'AWAITING_SIGNATURE' } }),
-    prisma.creditContract.count({ where: { status: 'SIGNED' } }),
+    // Já em vigor, mas o Pix ainda não foi confirmado como enviado.
+    prisma.creditContract.count({ where: { status: 'ACTIVE', disbursedProof: null } }),
     prisma.borrower.count({ where: { status: 'EM_DIA', contracts: { none: { status: { in: ['DRAFT', 'AWAITING_SIGNATURE', 'SIGNED', 'ACTIVE'] } } } } }),
     prisma.cashEntry.findFirst({ where: { kind: 'LIBERACAO' }, orderBy: { happenedAt: 'desc' } }),
   ]);
@@ -169,7 +202,7 @@ async function retratoDaOperacao() {
   const tarefas = recomendacoes({
     padroes,
     caixa, saude, projecao, clientesAtivos, clientesProntosParaSubir: prontos,
-    parcelasAtrasadas, contratosAguardandoAssinatura: aguardando, contratosAssinadosSemLiberar: assinados,
+    parcelasAtrasadas, contratosAguardandoAssinatura: aguardando, pixAEnviar,
     diasCaixaParado: caixa.disponivelParaEmprestar >= padroes.contratoMinimo ? diasCaixaParado : 0,
   });
 
@@ -380,6 +413,9 @@ export async function creditRoutes(app: FastifyInstance) {
       frequency: z.enum(['DAILY', 'WEEKLY']).default('DAILY'),
       firstDueDate: z.string().refine(isValidYmd).optional(),
       ratePercent: z.coerce.number().min(0).max(100).optional(),
+      /** Se você disser quanto quer de parcela, o sistema descobre o prazo. */
+      parcelaAlvo: z.coerce.number().positive().max(100_000).optional(),
+      cronograma: z.array(z.object({ dueDate: z.string().refine(isValidYmd), amount: z.coerce.number().positive().max(100_000) })).min(1).max(120).optional(),
     }).parse(req.body);
 
     const b = await prisma.borrower.findUnique({ where: { id: body.borrowerId }, include: { level: true, analyses: { orderBy: { createdAt: 'desc' }, take: 1 } } });
@@ -419,15 +455,36 @@ export async function creditRoutes(app: FastifyInstance) {
       return reply.code(422).send({ error: 'no_capacity', message: 'A capacidade estimada não cobre nenhum valor com esse prazo. Aumente o número de parcelas ou revise os dados do negócio.' });
     }
 
+    // "Quero que ele pague R$ 25 por dia" -> o prazo sai da conta.
+    let parcelas = body.installments;
+    if (body.parcelaAlvo && principal > 0) {
+      const totalComJuros = principal * (1 + rate / 100);
+      parcelas = Math.max(2, Math.min(120, Math.ceil(totalComJuros / body.parcelaAlvo)));
+    }
+
     const firstDue = body.firstDueDate ?? addDaysYmd(ymdSaoPaulo(), 1);
     const costs = computeCosts({
-      principal, termDays: body.installments * (body.frequency === 'WEEKLY' ? 7 : 1),
+      principal, termDays: parcelas * (body.frequency === 'WEEKLY' ? 7 : 1),
       chargeIof: settings.chargeIof, iofFixedPercent: settings.iofFixedPercent, iofDailyPercent: settings.iofDailyPercent,
       tacFixed: settings.tacFixed, tacPercent: settings.tacPercent, otherCosts: settings.otherCosts, costsMode: settings.costsMode,
     });
-    const q = buildQuote({ principal, ratePercent: rate, installments: body.installments, frequency: body.frequency, firstDueDate: firstDue, openDaysPerWeek: b.openDaysPerWeek, costs });
+    const q = buildQuote({ principal, ratePercent: rate, installments: parcelas, frequency: body.frequency, firstDueDate: firstDue, openDaysPerWeek: b.openDaysPerWeek, costs, cronograma: body.cronograma });
 
     const alerts: string[] = [...capacity.warnings];
+    if (body.cronograma?.length) {
+      const erro = conferirCronograma(body.cronograma);
+      if (erro) alerts.unshift(erro);
+      const esperado = principal * (1 + rate / 100);
+      const diferenca = q.totalPayable - esperado;
+      if (Math.abs(diferenca) >= 0.01) {
+        alerts.unshift(diferenca > 0
+          ? `As parcelas somam ${real(q.totalPayable)}, ou seja, ${real(diferenca)} a mais que o combinado de ${real(esperado)}.`
+          : `As parcelas somam ${real(q.totalPayable)}, ou seja, ${real(-diferenca)} a menos que o combinado de ${real(esperado)}.`);
+      }
+    }
+    if (q.cetMonthly > 0.8) {
+      alerts.unshift(`Prazo curto demais: ${q.installments} parcelas fazem o custo efetivo saltar para ${q.cetLabel}. Alongue o prazo — a parcela cai e o contrato fica mais seguro.`);
+    }
     if (q.installmentAmount > (body.frequency === 'DAILY' ? capacity.dailyCapacity : capacity.weeklyCapacity)) {
       alerts.push(`A parcela de R$ ${q.installmentAmount.toFixed(2)} passa da capacidade estimada (R$ ${(body.frequency === 'DAILY' ? capacity.dailyCapacity : capacity.weeklyCapacity).toFixed(2)}). Reduza o valor ou alongue o prazo.`);
     }
@@ -468,11 +525,13 @@ export async function creditRoutes(app: FastifyInstance) {
     const level = body.levelId ? await prisma.creditLevel.findUnique({ where: { id: body.levelId } }) : b.level;
     const rate = body.ratePercent ?? num(level?.ratePercent ?? D(20));
     const levelMax = Math.min(num(level?.maxPrincipal ?? D(200)), settings.maxPrincipalGlobal);
+    // Daqui para baixo o sistema AVISA, mas não impede. Quem decide é você.
+    const avisos: string[] = [];
     if (body.principal > levelMax) {
-      return reply.code(422).send({ error: 'above_level', message: `O valor passa do teto do nível do cliente (R$ ${levelMax.toFixed(2)}). Suba o cliente de nível ou reduza o valor.` });
+      avisos.push(`Acima do teto do nível deste cliente (${real(levelMax)}): ele ainda não tem histórico para esse tamanho.`);
     }
     if (body.principal < settings.minPrincipal) {
-      return reply.code(422).send({ error: 'below_min', message: `O valor mínimo configurado é R$ ${settings.minPrincipal.toFixed(2)}.` });
+      avisos.push(`Abaixo do valor mínimo configurado (${real(settings.minPrincipal)}).`);
     }
 
     const costs = computeCosts({
@@ -494,19 +553,27 @@ export async function creditRoutes(app: FastifyInstance) {
       jaEmprestadoAoCliente: num(jaComEle._sum.outstanding), disponivelParaEmprestar: retrato.caixa.disponivelParaEmprestar,
       padroes: retrato.padroes,
     });
-    if (!body.ignorarLimite && body.principal > limite.valorSugerido) {
-      return reply.code(422).send({
-        error: 'limite_operacao',
-        message: `${limite.motivo} Reduza o valor ou marque a opção de assumir o risco.`,
-        sugerido: limite.valorSugerido,
-        caixa: retrato.caixa,
-      });
-    }
-    if (body.ignorarLimite && body.principal > limite.valorSugerido) {
+    if (body.principal > limite.valorSugerido) {
+      avisos.push(limite.motivo);
       await audit(req, 'credit.limit.override', 'Borrower', b.id, { pedido: body.principal, sugerido: limite.valorSugerido, motivo: limite.motivo });
     }
+    if (body.principal > retrato.caixa.saldoCaixa) {
+      avisos.push(`Você tem ${real(retrato.caixa.saldoCaixa)} em caixa e este contrato é maior que isso. Confirme se o dinheiro existe antes de liberar.`);
+    }
+    if (!retrato.saude.podeCrescer && retrato.saude.frases[0]) avisos.push(retrato.saude.frases[0]);
 
-    const q = buildQuote({ principal: body.principal, ratePercent: rate, installments: body.installments, frequency: body.frequency, firstDueDate: body.firstDueDate, openDaysPerWeek: b.openDaysPerWeek, costs });
+    if (body.cronograma?.length) {
+      const erro = conferirCronograma(body.cronograma);
+      if (erro) return reply.code(422).send({ error: 'cronograma_invalido', message: erro });
+    }
+
+    const q = buildQuote({ principal: body.principal, ratePercent: rate, installments: body.installments, frequency: body.frequency, firstDueDate: body.firstDueDate, openDaysPerWeek: b.openDaysPerWeek, costs, cronograma: body.cronograma });
+    if (q.combinado) {
+      const esperado = body.principal * (1 + rate / 100);
+      if (Math.abs(q.totalPayable - esperado) >= 0.01) {
+        avisos.push(`Cronograma combinado: as parcelas somam ${real(q.totalPayable)} em vez de ${real(esperado)}. O contrato vale pelo que está nas parcelas.`);
+      }
+    }
     const number = await nextContractNumber();
     const issuedAt = new Date();
 
@@ -541,6 +608,11 @@ export async function creditRoutes(app: FastifyInstance) {
         signature: {
           create: { token, expiresAt: new Date(Date.now() + settings.signatureTtlHours * 3600_000) },
         },
+        // As parcelas nascem junto do contrato: são exatamente as datas e os
+        // valores que o cliente lê e assina. Depois disso não mudam sozinhas.
+        installments: {
+          create: q.dueDates.map((d, idx) => ({ sequence: idx + 1, dueDate: ymdToDbDate(d), amountDue: D(q.amounts[idx]!) })),
+        },
       },
     });
 
@@ -550,7 +622,7 @@ export async function creditRoutes(app: FastifyInstance) {
 
     return reply.code(201).send({
       id: contract.id, number, link, whatsappLink: waLink(b.whatsapp, message), message,
-      hash: shortHash(contract.contractHash), quote: q,
+      hash: shortHash(contract.contractHash), quote: q, avisos,
     });
   });
 
@@ -597,6 +669,7 @@ export async function creditRoutes(app: FastifyInstance) {
       firstDueDate: dbDateToYmd(c.firstDueDate), purpose: c.purpose,
       receivePixKey: c.receivePixKey, payToPixKey: c.payToPixKey,
       signedAt: c.signedAt, disbursedAt: c.disbursedAt, paidAt: c.paidAt, createdAt: c.createdAt,
+      pixConfirmado: Boolean(c.disbursedProof), comprovante: c.disbursedProof,
       borrower: {
         id: c.borrower.id, name: c.borrower.name, tradeName: c.borrower.tradeName, document: c.borrower.document,
         personType: c.borrower.personType, whatsapp: c.borrower.whatsapp, city: `${c.borrower.addressCity}/${c.borrower.addressState}`,
@@ -637,61 +710,93 @@ export async function creditRoutes(app: FastifyInstance) {
   });
 
   /** Liberação do dinheiro: cria as parcelas e coloca o contrato para correr. */
-  app.post('/api/credito/contratos/:id/liberar', { preHandler: requireAdmin }, async (req, reply) => {
+  /**
+   * O contrato já entra em vigor sozinho quando o cliente assina.
+   * Aqui você só confirma que o Pix saiu — é o que tira a tarefa do painel.
+   */
+  app.post('/api/credito/contratos/:id/confirmar-pix', async (req, reply) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
-    const body = z.object({ proof: z.string().trim().max(200).optional(), firstDueDate: z.string().refine(isValidYmd).optional() }).parse(req.body ?? {});
+    const { proof } = z.object({ proof: z.string().trim().max(200).optional() }).parse(req.body ?? {});
 
-    const c = await prisma.creditContract.findUnique({ where: { id }, include: { borrower: true, signature: true } });
+    const c = await prisma.creditContract.findUnique({ where: { id }, include: { borrower: true } });
     if (!c) return reply.code(404).send({ error: 'not_found', message: 'Contrato não encontrado' });
-    if (c.status !== 'SIGNED') return reply.code(409).send({ error: 'not_signed', message: 'O contrato só pode ser liberado depois que o cliente assinar.' });
+    if (!['ACTIVE', 'SIGNED'].includes(c.status)) {
+      return reply.code(409).send({ error: 'nao_ativo', message: 'Só contratos assinados têm Pix a confirmar.' });
+    }
+    if (c.disbursedProof) return reply.code(409).send({ error: 'ja_confirmado', message: 'O envio deste Pix já foi confirmado.' });
 
-    const tomorrow = addDaysYmd(ymdSaoPaulo(), 1);
-    const stored = dbDateToYmd(c.firstDueDate);
-    const firstDue = body.firstDueDate ?? (stored < tomorrow ? tomorrow : stored);
-    const q = buildQuote({
-      principal: num(c.principal), ratePercent: num(c.ratePercent), installments: c.installmentsCount,
-      frequency: c.frequency, firstDueDate: firstDue, openDaysPerWeek: c.borrower.openDaysPerWeek,
-    });
+    const comprovante = proof?.trim() || `Confirmado por ${req.operator!.email}`;
 
-    await prisma.$transaction(async (tx) => {
-      await tx.creditInstallment.createMany({
-        data: q.dueDates.map((d, idx) => ({ contractId: id, sequence: idx + 1, dueDate: ymdToDbDate(d), amountDue: D(q.amounts[idx]!) })),
+    if (c.status === 'SIGNED') {
+      // Contrato assinado antes desta versão, quando ainda existia o passo de
+      // liberar à mão. Entra em vigor agora, junto com a saída do caixa.
+      const parcelas = await prisma.creditInstallment.findMany({ where: { contractId: id }, orderBy: { sequence: 'asc' } });
+      const total = parcelas.reduce((soma, p) => soma.plus(p.amountDue), D(0));
+      const liquido = num(c.netToBorrower) > 0 ? num(c.netToBorrower) : num(c.principal);
+      await prisma.$transaction(async (tx) => {
+        await tx.creditContract.update({
+          where: { id },
+          data: { status: 'ACTIVE', disbursedAt: c.disbursedAt ?? new Date(), disbursedProof: comprovante, outstanding: total },
+        });
+        await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'ATIVO' } });
+        const jaSaiu = await tx.cashEntry.findFirst({ where: { contractId: id, kind: 'LIBERACAO' } });
+        if (!jaSaiu) {
+          await tx.cashEntry.create({
+            data: {
+              kind: 'LIBERACAO', amount: D(-liquido), happenedAt: new Date(),
+              description: `Liberação do contrato ${c.number} — ${c.borrower.name}`,
+              contractId: id, borrowerId: c.borrowerId, operatorId: req.operator!.id,
+            },
+          });
+        }
       });
-      await tx.creditContract.update({
-        where: { id },
-        data: { status: 'ACTIVE', disbursedAt: new Date(), disbursedProof: body.proof ?? null, firstDueDate: ymdToDbDate(q.firstDueDate), outstanding: D(q.totalPayable) },
-      });
-      await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'ATIVO' } });
-      // Saiu dinheiro do caixa: registra o valor que foi de fato para o cliente.
-      await tx.cashEntry.create({
-        data: {
-          kind: 'LIBERACAO', amount: D(-(num(c.netToBorrower) > 0 ? num(c.netToBorrower) : num(c.principal))),
-          happenedAt: new Date(), description: `Liberação do contrato ${c.number} — ${c.borrower.name}`,
-          contractId: c.id, borrowerId: c.borrowerId, operatorId: req.operator!.id,
-        },
-      });
-      await tx.creditNotification.create({
-        data: {
-          borrowerId: c.borrowerId, contractId: id, kind: 'BOAS_VINDAS', referenceDate: ymdToDbDate(ymdSaoPaulo()),
-          message: buildMessage('BOAS_VINDAS', {
-            firstName: c.borrower.name.split(' ')[0] ?? c.borrower.name, contractNumber: c.number,
-            installmentSeq: 1, installmentsCount: c.installmentsCount, amount: q.amounts[0], dueDate: q.firstDueDate,
-            pixKey: c.payToPixKey, pixOwner: (await getSettings()).pixOwner,
-          }),
-        },
-      });
-    });
-
-    await audit(req, 'credit.contract.disburse', 'CreditContract', id, { firstDue: q.firstDueDate, proof: body.proof ?? null });
-    return { ok: true, firstDueDate: q.firstDueDate, installments: q.installments };
+    } else {
+      await prisma.creditContract.update({ where: { id }, data: { disbursedProof: comprovante } });
+    }
+    limparCacheDoRetrato();
+    await audit(req, 'credit.contract.pix_confirmed', 'CreditContract', id, { proof: proof ?? null });
+    return { ok: true };
   });
 
   app.post('/api/credito/contratos/:id/cancelar', { preHandler: requireAdmin }, async (req, reply) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
     const { reason } = z.object({ reason: z.string().trim().min(3).max(300) }).parse(req.body);
-    const r = await prisma.creditContract.updateMany({ where: { id, status: { in: ['DRAFT', 'AWAITING_SIGNATURE', 'SIGNED'] } }, data: { status: 'CANCELLED' } });
-    if (r.count !== 1) return reply.code(409).send({ error: 'cannot_cancel', message: 'Só dá para cancelar contratos que ainda não foram liberados.' });
-    await audit(req, 'credit.contract.cancel', 'CreditContract', id, { reason });
+
+    const c = await prisma.creditContract.findUnique({
+      where: { id },
+      include: { installments: { include: { payments: true } }, borrower: true },
+    });
+    if (!c) return reply.code(404).send({ error: 'not_found', message: 'Contrato não encontrado' });
+    if (['PAID', 'CANCELLED'].includes(c.status)) {
+      return reply.code(409).send({ error: 'cannot_cancel', message: 'Este contrato já está encerrado.' });
+    }
+
+    const recebido = c.installments.flatMap((i) => i.payments).reduce((soma, p) => soma.plus(p.amount), D(0));
+    if (recebido.greaterThan(0)) {
+      return reply.code(409).send({
+        error: 'ja_tem_pagamento',
+        message: `Este contrato já recebeu ${real(Number(recebido))}. Não dá para cancelar: quite ou renegocie as parcelas que faltam.`,
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.creditContract.update({ where: { id }, data: { status: 'CANCELLED', outstanding: D(0) } });
+      // Se o dinheiro já tinha saído do caixa na assinatura, ele volta.
+      const saida = await tx.cashEntry.findFirst({ where: { contractId: id, kind: 'LIBERACAO' } });
+      if (saida) {
+        await tx.cashEntry.create({
+          data: {
+            kind: 'AJUSTE', amount: saida.amount.negated(), happenedAt: new Date(),
+            description: `Estorno da liberação do contrato ${c.number} (cancelado): ${reason}`,
+            contractId: id, borrowerId: c.borrowerId, operatorId: req.operator!.id,
+          },
+        });
+      }
+      await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'LEAD' } });
+    });
+
+    limparCacheDoRetrato();
+    await audit(req, 'credit.contract.cancel', 'CreditContract', id, { reason, estornado: true });
     return { ok: true };
   });
 
@@ -778,6 +883,7 @@ export async function creditRoutes(app: FastifyInstance) {
       return { settled, finished, levelUp, outstanding: finished ? '0.00' : outstanding.toFixed(2) };
     });
 
+    limparCacheDoRetrato();
     await audit(req, 'credit.payment.register', 'CreditInstallment', id, { amount: amount.toFixed(2), method: body.method });
     return result;
   });
@@ -957,6 +1063,85 @@ export async function creditRoutes(app: FastifyInstance) {
     };
   });
 
+  /**
+   * Renegociação de uma parcela: "não vou conseguir hoje, deixa pra sexta".
+   * Muda a data e, se preciso, o valor de uma parcela ainda não paga.
+   * Fica tudo registrado no histórico, com o motivo.
+   */
+  app.patch('/api/credito/parcelas/:id', async (req, reply) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    const body = z.object({
+      dueDate: z.string().refine(isValidYmd).optional(),
+      amount: z.coerce.number().positive().max(100_000).optional(),
+      /** Por padrão o que já correu de multa e juros é cobrado, como diz o contrato. */
+      perdoarEncargos: z.boolean().default(false),
+      motivo: z.string().trim().min(3).max(200),
+    }).parse(req.body);
+
+    const inst = await prisma.creditInstallment.findUnique({ where: { id }, include: { contract: true } });
+    if (!inst) return reply.code(404).send({ error: 'not_found', message: 'Parcela não encontrada' });
+    if (inst.status === 'PAID') return reply.code(409).send({ error: 'ja_paga', message: 'Esta parcela já está paga.' });
+
+    const hoje = ymdSaoPaulo();
+    const vencimento = dbDateToYmd(inst.dueDate);
+    const diasAtraso = Math.max(0, Math.round((Date.parse(`${hoje}T12:00:00Z`) - Date.parse(`${vencimento}T12:00:00Z`)) / 86400_000));
+
+    // Multa e juros que já correram até hoje. Eles são do contrato, não somem
+    // porque a data mudou: ou entram no valor da parcela, ou são perdoados de
+    // propósito — e aí fica registrado quem perdoou e por quê.
+    const encargosCorridos = lateCharge(inst.amountDue, diasAtraso, inst.contract.lateFeePercent, inst.contract.lateDailyPercent);
+    const encargosMantidos = body.perdoarEncargos ? D(0) : encargosCorridos;
+
+    const novaData = body.dueDate ?? vencimento;
+    const valorBase = body.amount != null ? D(body.amount) : inst.amountDue;
+    // O novo valor já embute o que correu: a partir da data combinada, o relógio
+    // do atraso recomeça do zero sobre esse valor.
+    const novoValor = valorBase.plus(encargosMantidos).toDecimalPlaces(2);
+
+    const repetida = await prisma.creditInstallment.findFirst({
+      where: { contractId: inst.contractId, dueDate: ymdToDbDate(novaData), NOT: { id } },
+    });
+    if (repetida) return reply.code(422).send({ error: 'data_ocupada', message: `Já existe a parcela ${repetida.sequence} nesse dia. Escolha outra data.` });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.creditInstallment.update({
+        where: { id },
+        data: {
+          dueDate: ymdToDbDate(novaData), amountDue: novoValor,
+          status: novaData > hoje ? 'PENDING' : inst.status === 'OVERDUE' ? 'OVERDUE' : 'PENDING',
+          lateCharge: D(0), // já foi incorporado ao valor da parcela
+        },
+      });
+      const parcelas = await tx.creditInstallment.findMany({ where: { contractId: inst.contractId } });
+      const aberto = parcelas.reduce((soma, p) => {
+        const falta = p.amountDue.plus(p.lateCharge).minus(p.amountPaid);
+        return soma.plus(falta.greaterThan(0) ? falta : D(0));
+      }, D(0));
+      await tx.creditContract.update({ where: { id: inst.contractId }, data: { outstanding: aberto.toDecimalPlaces(2) } });
+      await tx.creditNotification.updateMany({ where: { installmentId: id, status: 'PENDENTE' }, data: { status: 'DISPENSADA' } });
+    });
+
+    limparCacheDoRetrato();
+    await audit(req, 'credit.installment.renegotiate', 'CreditInstallment', id, {
+      de: vencimento, para: novaData, diasAtraso,
+      valorDe: inst.amountDue.toFixed(2), valorPara: novoValor.toFixed(2),
+      encargosCorridos: encargosCorridos.toFixed(2),
+      encargosPerdoados: body.perdoarEncargos ? encargosCorridos.toFixed(2) : '0.00',
+      motivo: body.motivo,
+    });
+
+    return {
+      ok: true, dueDate: novaData, amountDue: novoValor.toFixed(2),
+      encargosCorridos: encargosCorridos.toFixed(2),
+      encargosCobrados: encargosMantidos.toFixed(2),
+      resumo: body.perdoarEncargos
+        ? `Parcela remarcada para ${novaData.split('-').reverse().join('/')}. Os ${real(Number(encargosCorridos))} de multa e juros foram perdoados.`
+        : encargosCorridos.greaterThan(0)
+          ? `Parcela remarcada para ${novaData.split('-').reverse().join('/')}. Os ${real(Number(encargosCorridos))} de multa e juros dos ${diasAtraso} dias de atraso entraram no valor, que passou a ser ${real(Number(novoValor))}.`
+          : `Parcela remarcada para ${novaData.split('-').reverse().join('/')}.`,
+    };
+  });
+
   // ----------------------------------------------------------------- caixa
   /** Painel do gestor: caixa, saúde da carteira, projeção e o que fazer hoje. */
   app.get('/api/credito/gestor', async () => {
@@ -1009,6 +1194,7 @@ export async function creditRoutes(app: FastifyInstance) {
         operatorId: req.operator!.id,
       },
     });
+    limparCacheDoRetrato();
     await audit(req, `cash.${body.kind.toLowerCase()}`, 'CashEntry', entrada.id, { amount: body.amount, description: body.description });
     return { ok: true, saldo: (await saldoDoCaixa()).toFixed(2) };
   });
@@ -1018,7 +1204,13 @@ export async function creditRoutes(app: FastifyInstance) {
     const { id } = z.object({ id: uuid }).parse(req.params);
     const doc = await prisma.borrowerDocument.findUnique({ where: { id } });
     if (!doc) return reply.code(404).send({ error: 'not_found' });
-    return reply.header('Content-Type', doc.mimeType).header('Cache-Control', 'private, max-age=60').send(Buffer.from(doc.data));
+    // O arquivo nunca muda depois de enviado: o navegador pode guardar por um dia.
+    if (req.headers['if-none-match'] === `"${doc.id}"`) return reply.code(304).send();
+    return reply
+      .header('Content-Type', doc.mimeType)
+      .header('Cache-Control', 'private, max-age=86400, immutable')
+      .header('ETag', `"${doc.id}"`)
+      .send(Buffer.from(doc.data));
   });
 
   app.post('/api/credito/notificacoes/:id/enviada', async (req) => {

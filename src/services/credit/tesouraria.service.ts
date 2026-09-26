@@ -271,7 +271,8 @@ export interface RecomendacaoInput {
   clientesProntosParaSubir: number;
   parcelasAtrasadas: number;
   contratosAguardandoAssinatura: number;
-  contratosAssinadosSemLiberar: number;
+  /** Contratos já em vigor cujo Pix ainda não foi confirmado como enviado. */
+  pixAEnviar: number;
   diasCaixaParado: number;
   padroes?: PadroesOperacao;
 }
@@ -300,12 +301,12 @@ export function recomendacoes(i: RecomendacaoInput): Recomendacao[] {
     });
   }
 
-  if (i.contratosAssinadosSemLiberar > 0) {
+  if (i.pixAEnviar > 0) {
     lista.push({
       ordem: ordem++,
-      titulo: `${i.contratosAssinadosSemLiberar} contrato${i.contratosAssinadosSemLiberar > 1 ? 's' : ''} assinado esperando o Pix`,
-      detalhe: 'O cliente já assinou e mandou os documentos. Confira as fotos, envie o Pix e libere: as parcelas só começam a contar depois disso.',
-      tom: 'ATENCAO',
+      titulo: `Envie o Pix de ${i.pixAEnviar} contrato${i.pixAEnviar > 1 ? 's' : ''} assinado${i.pixAEnviar > 1 ? 's' : ''}`,
+      detalhe: 'O cliente assinou e o contrato já está valendo: as parcelas começaram a contar. Confira as fotos dos documentos, mande o Pix e marque como enviado.',
+      tom: 'URGENTE',
       acao: 'LIBERAR',
     });
   }

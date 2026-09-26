@@ -1,4 +1,3 @@
-// Variáveis fictícias só para os testes unitários (nenhuma chamada real é feita).
 import { randomBytes } from 'node:crypto';
 Object.assign(process.env, {
   DATABASE_URL: 'postgresql://test@localhost/test', FIREBASE_PROJECT_ID: 'test', CORS_ORIGINS: 'https://test.local',

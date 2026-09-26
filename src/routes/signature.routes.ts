@@ -6,6 +6,9 @@ import { dbDateToYmd } from '../lib/dates';
 import { getSegment } from '../services/credit/segments';
 import { shortHash } from '../services/credit/contract.service';
 import { getSettings } from '../services/credit/settings.service';
+import { addDaysYmd, ymdSaoPaulo, ymdToDbDate } from '../lib/dates';
+import { buildMessage } from '../services/credit/contract.service';
+import { limparCacheDoRetrato } from './credit.routes';
 
 /**
  * ROTAS PÚBLICAS DA ASSINATURA — sem login.
@@ -168,34 +171,94 @@ export async function signatureRoutes(app: FastifyInstance) {
     }
 
     const now = new Date();
-    await prisma.$transaction([
-      prisma.contractSignature.update({
+    const hoje = ymdSaoPaulo();
+    const settings = await getSettings();
+
+    // As parcelas já existem desde a criação: são as que ele acabou de ler.
+    const parcelas = await prisma.creditInstallment.findMany({ where: { contractId: c.id }, orderBy: { sequence: 'asc' } });
+    const primeira = parcelas.length ? dbDateToYmd(parcelas[0]!.dueDate) : hoje;
+    // Se ele demorou para assinar e a primeira data já passou, tudo anda junto,
+    // mantendo os intervalos combinados.
+    const deslocamento = primeira < hoje
+      ? Math.round((Date.parse(`${addDaysYmd(hoje, 1)}T12:00:00Z`) - Date.parse(`${primeira}T12:00:00Z`)) / 86400_000)
+      : 0;
+    const novasDatas = parcelas.map((p) => addDaysYmd(dbDateToYmd(p.dueDate), deslocamento));
+    const totalEmAberto = parcelas.reduce((soma, p) => soma.plus(p.amountDue), new Prisma.Decimal(0));
+    const liquido = Number(c.netToBorrower) > 0 ? Number(c.netToBorrower) : Number(c.principal);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.contractSignature.update({
         where: { token },
         data: {
           acceptedAt: now, signerName: c.borrower.name, signerDocument: body.signerDocument,
           signerIp: req.ip, signerUserAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
           signerPixKey: body.pixKey, signerPixKeyType: body.pixKeyType, typedSignature: body.typedSignature,
         },
-      }),
-      prisma.creditContract.update({
+      });
+
+      if (deslocamento !== 0) {
+        for (const [idx, p] of parcelas.entries()) {
+          await tx.creditInstallment.update({ where: { id: p.id }, data: { dueDate: ymdToDbDate(novasDatas[idx]!) } });
+        }
+      }
+
+      // Assinou, valeu: o contrato entra em vigor na hora, sem depender de
+      // ninguém apertar botão. O que falta é o Pix, e isso vira tarefa do dia.
+      await tx.creditContract.update({
         where: { id: c.id },
-        data: { status: 'SIGNED', signedAt: now, receivePixKey: body.pixKey },
-      }),
-      prisma.auditLog.create({
         data: {
-          actor: 'cliente:assinatura', action: 'credit.contract.signed', entity: 'CreditContract', entityId: c.id,
-          ip: req.ip,
-          after: { contractHash: c.contractHash, signerDocument: body.signerDocument, pixKeyType: body.pixKeyType, userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300) } as Prisma.InputJsonValue,
+          status: 'ACTIVE', signedAt: now, receivePixKey: body.pixKey,
+          disbursedAt: now, outstanding: totalEmAberto,
+          firstDueDate: parcelas.length ? ymdToDbDate(novasDatas[0]!) : c.firstDueDate,
         },
-      }),
-    ]);
+      });
+      await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'ATIVO' } });
+
+      // O dinheiro sai do caixa agora. A confirmação do Pix é a tarefa que
+      // aparece no painel até você marcar como enviado.
+      await tx.cashEntry.create({
+        data: {
+          kind: 'LIBERACAO', amount: new Prisma.Decimal(-liquido), happenedAt: now,
+          description: `Liberação do contrato ${c.number} — ${c.borrower.name}`,
+          contractId: c.id, borrowerId: c.borrowerId,
+        },
+      });
+
+      if (parcelas.length) {
+        await tx.creditNotification.create({
+          data: {
+            borrowerId: c.borrowerId, contractId: c.id, kind: 'BOAS_VINDAS', referenceDate: ymdToDbDate(hoje),
+            message: buildMessage('BOAS_VINDAS', {
+              firstName: c.borrower.name.split(' ')[0] ?? c.borrower.name, contractNumber: c.number,
+              installmentSeq: 1, installmentsCount: parcelas.length,
+              amount: Number(parcelas[0]!.amountDue), dueDate: novasDatas[0]!,
+              pixKey: c.payToPixKey, pixOwner: settings.pixOwner,
+            }),
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          actor: 'cliente:assinatura', action: 'credit.contract.signed_and_active', entity: 'CreditContract', entityId: c.id,
+          ip: req.ip,
+          after: {
+            contractHash: c.contractHash, signerDocument: body.signerDocument, pixKeyType: body.pixKeyType,
+            diasAdiados: deslocamento, primeiroVencimento: novasDatas[0] ?? null,
+            userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+
+    limparCacheDoRetrato();
 
     return {
       ok: true,
       contractNumber: c.number,
       hash: shortHash(c.contractHash),
       signedAt: now,
-      message: 'Contrato assinado. O valor será enviado para a sua chave Pix após a conferência dos documentos.',
+      message: 'Contrato assinado! O valor será enviado para a sua chave Pix em instantes.',
     };
   });
 }
