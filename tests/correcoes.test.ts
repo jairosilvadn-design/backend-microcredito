@@ -121,6 +121,19 @@ check('faltando dinheiro no sistema, a correção entra positiva (+450.50)', par
 check('corrigir para o mesmo valor não lança nada', correcaoDeSaldo(800, 800) === null);
 check('diferença de centavo abaixo de 1 não lança nada', correcaoDeSaldo(800, 800.004) === null);
 
+// ---- O mesmo número, dois significados: em mãos x capital total ----
+/** Mesma conta da rota: se o valor inclui a rua, a rua é descontada. */
+function alvoDoCaixa(digitado: number, naRua: number, incluiNaRua: boolean) {
+  return incluiNaRua ? D(digitado).minus(naRua).toDecimalPlaces(2) : D(digitado);
+}
+
+const NA_RUA = 497.69;
+check('"capital total de R$1.200" com R$497,69 na rua vira R$702,31 em caixa', alvoDoCaixa(1200, NA_RUA, true).toFixed(2) === '702.31');
+check('"tenho R$1.200 em mãos" deixa o caixa em R$1.200 mesmo', alvoDoCaixa(1200, NA_RUA, false).toFixed(2) === '1200.00');
+check('e aí o total do negócio fica R$1.697,69, não R$1.200', D(1200).plus(NA_RUA).toFixed(2) === '1697.69');
+check('capital menor que o que está na rua não fecha e é recusado', alvoDoCaixa(300, NA_RUA, true).lessThan(0));
+check('sem nada na rua, as duas leituras dão o mesmo número', alvoDoCaixa(1200, 0, true).toFixed(2) === alvoDoCaixa(1200, 0, false).toFixed(2));
+
 // ---- Apagar lançamento: só o que foi feito à mão ----
 const DA_MAO = ['APORTE', 'RETIRADA', 'DESPESA', 'AJUSTE'];
 check('aporte lançado à mão pode ser apagado', DA_MAO.includes('APORTE'));

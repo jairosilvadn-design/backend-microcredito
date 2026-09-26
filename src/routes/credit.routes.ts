@@ -1206,21 +1206,35 @@ export async function creditRoutes(app: FastifyInstance) {
    * correção. É o caminho certo: usar "Retirar" para acertar o saldo sujaria
    * o relatório, fazendo parecer que você tirou dinheiro do negócio.
    */
-  app.put('/api/credito/caixa/saldo', { preHandler: requireAdmin }, async (req) => {
+  app.put('/api/credito/caixa/saldo', { preHandler: requireAdmin }, async (req, reply) => {
     const body = z.object({
       saldoReal: z.coerce.number().min(0).max(10_000_000),
+      // Se o valor digitado JÁ inclui o que está emprestado na rua, o sistema
+      // desconta sozinho: quem tem R$1.200 de capital com R$497 na rua tem
+      // R$702 em mãos. Sem isso, o mesmo número significa duas coisas.
+      incluiNaRua: z.coerce.boolean().optional(),
       motivo: z.string().trim().min(3).max(200).optional(),
     }).parse(req.body);
 
     const atual = await saldoDoCaixa();
-    const diferenca = D(body.saldoReal).minus(atual).toDecimalPlaces(2);
+    const naRua = (await retratoDaOperacao()).principalNaRua;
+    const alvo = body.incluiNaRua
+      ? D(body.saldoReal).minus(naRua).toDecimalPlaces(2)
+      : D(body.saldoReal);
+    if (alvo.lessThan(0)) {
+      return reply.code(400).send({
+        error: 'menor_que_a_rua',
+        message: `Você tem ${real(naRua)} emprestado na rua. Um capital total de ${real(body.saldoReal)} seria menor que isso, o que não fecha. Confira o valor.`,
+      });
+    }
+    const diferenca = alvo.minus(atual).toDecimalPlaces(2);
     if (diferenca.abs().lessThan(0.01)) {
       return { ok: true, semMudanca: true, saldo: atual.toFixed(2), resumo: 'O caixa já está com esse valor. Nada foi lançado.' };
     }
 
     const sentido = diferenca.greaterThan(0) ? 'a mais' : 'a menos';
     const descricao = body.motivo?.trim()
-      || `Correção do saldo: de ${real(Number(atual))} para ${real(body.saldoReal)}.`;
+      || `Correção do saldo: de ${real(Number(atual))} para ${real(Number(alvo))}.`;
 
     const entrada = await prisma.cashEntry.create({
       data: {
@@ -1236,7 +1250,10 @@ export async function creditRoutes(app: FastifyInstance) {
     const novo = await saldoDoCaixa();
     return {
       ok: true, saldo: novo.toFixed(2), diferenca: diferenca.toFixed(2),
-      resumo: `Caixa corrigido de ${real(Number(atual))} para ${real(Number(novo))}: ${real(Number(diferenca.abs()))} ${sentido}, lançado como correção.`,
+      resumo: body.incluiNaRua
+        ? `Capital de ${real(body.saldoReal)}, com ${real(naRua)} emprestado na rua: sobram ${real(Number(novo))} em caixa. Diferença de ${real(Number(diferenca.abs()))} ${sentido} lançada como correção.`
+        : `Caixa corrigido de ${real(Number(atual))} para ${real(Number(novo))}: ${real(Number(diferenca.abs()))} ${sentido}, lançado como correção.`,
+      naRua: naRua.toFixed(2),
     };
   });
 
