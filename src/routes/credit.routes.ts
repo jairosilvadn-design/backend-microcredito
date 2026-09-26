@@ -1199,6 +1199,75 @@ export async function creditRoutes(app: FastifyInstance) {
     return { ok: true, saldo: (await saldoDoCaixa()).toFixed(2) };
   });
 
+  /**
+   * Corrigir o saldo do caixa para o valor real.
+   *
+   * Você digita quanto tem de verdade e o sistema lança a diferença como
+   * correção. É o caminho certo: usar "Retirar" para acertar o saldo sujaria
+   * o relatório, fazendo parecer que você tirou dinheiro do negócio.
+   */
+  app.put('/api/credito/caixa/saldo', { preHandler: requireAdmin }, async (req) => {
+    const body = z.object({
+      saldoReal: z.coerce.number().min(0).max(10_000_000),
+      motivo: z.string().trim().min(3).max(200).optional(),
+    }).parse(req.body);
+
+    const atual = await saldoDoCaixa();
+    const diferenca = D(body.saldoReal).minus(atual).toDecimalPlaces(2);
+    if (diferenca.abs().lessThan(0.01)) {
+      return { ok: true, semMudanca: true, saldo: atual.toFixed(2), resumo: 'O caixa já está com esse valor. Nada foi lançado.' };
+    }
+
+    const sentido = diferenca.greaterThan(0) ? 'a mais' : 'a menos';
+    const descricao = body.motivo?.trim()
+      || `Correção do saldo: de ${real(Number(atual))} para ${real(body.saldoReal)}.`;
+
+    const entrada = await prisma.cashEntry.create({
+      data: {
+        kind: 'AJUSTE', amount: diferenca, description: descricao,
+        happenedAt: new Date(), operatorId: req.operator!.id,
+      },
+    });
+    limparCacheDoRetrato();
+    await audit(req, 'cash.saldo_corrigido', 'CashEntry', entrada.id, {
+      saldoAnterior: atual.toFixed(2), saldoReal: body.saldoReal, diferenca: diferenca.toFixed(2),
+    });
+
+    const novo = await saldoDoCaixa();
+    return {
+      ok: true, saldo: novo.toFixed(2), diferenca: diferenca.toFixed(2),
+      resumo: `Caixa corrigido de ${real(Number(atual))} para ${real(Number(novo))}: ${real(Number(diferenca.abs()))} ${sentido}, lançado como correção.`,
+    };
+  });
+
+  /**
+   * Apagar um lançamento feito à mão (aporte, retirada, despesa ou correção).
+   * Liberações e recebimentos não entram aqui: eles pertencem a um contrato e
+   * só mudam pelo contrato, senão o caixa e a carteira param de bater.
+   */
+  app.delete('/api/credito/caixa/:id', { preHandler: requireAdmin }, async (req, reply) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    const entrada = await prisma.cashEntry.findUnique({ where: { id } });
+    if (!entrada) return reply.code(404).send({ error: 'not_found', message: 'Lançamento não encontrado.' });
+
+    const manuais = ['APORTE', 'RETIRADA', 'DESPESA', 'AJUSTE'];
+    if (!manuais.includes(entrada.kind)) {
+      return reply.code(409).send({
+        error: 'lancamento_de_contrato',
+        message: 'Este lançamento veio de um contrato (liberação ou recebimento). Para desfazer, cancele ou acerte o contrato — assim o caixa e a carteira continuam batendo.',
+      });
+    }
+
+    await prisma.cashEntry.delete({ where: { id } });
+    limparCacheDoRetrato();
+    await audit(req, 'cash.lancamento_apagado', 'CashEntry', id, {
+      kind: entrada.kind, amount: money2(entrada.amount), description: entrada.description,
+    });
+
+    const saldo = await saldoDoCaixa();
+    return { ok: true, saldo: saldo.toFixed(2), resumo: `Lançamento apagado. O caixa agora é ${real(Number(saldo))}.` };
+  });
+
   /** Arquivo enviado pelo cliente (documento/selfie/comprovante). */
   app.get('/api/credito/documentos/:id', async (req, reply) => {
     const { id } = z.object({ id: uuid }).parse(req.params);

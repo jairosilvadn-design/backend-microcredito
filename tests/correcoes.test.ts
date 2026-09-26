@@ -103,5 +103,30 @@ const semPendencia = recomendacoes({
 });
 check('Pix confirmado: a tarefa some da lista', !semPendencia.some((t) => t.acao === 'LIBERAR'));
 
+// ---- Corrigir o saldo do caixa: a diferença vira AJUSTE, nunca RETIRADA ----
+/** Mesma conta que a rota PUT /api/credito/caixa/saldo faz. */
+function correcaoDeSaldo(saldoAtual: number, saldoReal: number) {
+  const diferenca = D(saldoReal).minus(saldoAtual).toDecimalPlaces(2);
+  if (diferenca.abs().lessThan(0.01)) return null;
+  return { kind: 'AJUSTE' as const, amount: diferenca, novoSaldo: D(saldoAtual).plus(diferenca) };
+}
+
+const paraMenos = correcaoDeSaldo(1702.31, 800);
+check(`caixa inflado por um teste: corrigir de R$1.702,31 para R$800 lança ${paraMenos?.amount.toFixed(2)}`, paraMenos?.amount.toFixed(2) === '-902.31');
+check('e o caixa passa a bater com a realidade', paraMenos?.novoSaldo.toFixed(2) === '800.00');
+check('a correção NÃO é uma retirada: o relatório não acusa saque do dono', paraMenos?.kind === 'AJUSTE');
+
+const paraMais = correcaoDeSaldo(800, 1250.5);
+check('faltando dinheiro no sistema, a correção entra positiva (+450.50)', paraMais?.amount.toFixed(2) === '450.50');
+check('corrigir para o mesmo valor não lança nada', correcaoDeSaldo(800, 800) === null);
+check('diferença de centavo abaixo de 1 não lança nada', correcaoDeSaldo(800, 800.004) === null);
+
+// ---- Apagar lançamento: só o que foi feito à mão ----
+const DA_MAO = ['APORTE', 'RETIRADA', 'DESPESA', 'AJUSTE'];
+check('aporte lançado à mão pode ser apagado', DA_MAO.includes('APORTE'));
+check('correção também', DA_MAO.includes('AJUSTE'));
+check('liberação de contrato não pode: caixa e carteira parariam de bater', !DA_MAO.includes('LIBERACAO'));
+check('recebimento de parcela também não', !DA_MAO.includes('RECEBIMENTO'));
+
 console.log(`\n${pass} passaram, ${fail} falharam`);
 process.exit(fail ? 1 : 0);

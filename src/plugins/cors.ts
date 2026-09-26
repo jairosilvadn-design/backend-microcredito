@@ -22,7 +22,7 @@ export async function registerCors(app: FastifyInstance) {
     },
     // PUT e PATCH são usados para salvar configurações, níveis e cadastros.
     // Faltando um método aqui, o navegador bloqueia o envio antes de sair.
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
     credentials: false,
     maxAge: 600, // cache do preflight por 10 min
