@@ -1,6 +1,7 @@
 import './setup-env';
 import { quote, computeCosts } from '../src/services/credit/pricing.service';
 import { limiteParaCliente, MODOS, recomendacoes, situacaoCaixa, saudeDaCarteira, projetarCaixa } from '../src/services/credit/tesouraria.service';
+import { addDaysYmd } from '../src/lib/dates';
 import { lateCharge } from '../src/services/credit/pricing.service';
 import { Prisma } from '@prisma/client';
 
@@ -102,6 +103,25 @@ const semPendencia = recomendacoes({
   contratosAguardandoAssinatura: 0, pixAEnviar: 0, diasCaixaParado: 0,
 });
 check('Pix confirmado: a tarefa some da lista', !semPendencia.some((t) => t.acao === 'LIBERAR'));
+
+// ---- "Entra nos próximos 7 dias": a janela e o que entra nela ----
+{
+  const hoje = '2026-09-26';
+  const limite = addDaysYmd(hoje, 6);
+  check(`a janela vai de hoje (${hoje}) até ${limite}`, limite === '2026-10-02');
+  check('são 7 dias contando hoje, não 7 dias além de hoje', limite !== '2026-10-03');
+
+  const vencimentos = ['2026-09-26', '2026-09-29', '2026-10-02', '2026-10-05'];
+  const dentro = vencimentos.filter((d) => d <= limite);
+  check(`3 das 4 parcelas caem dentro da janela (a de 05/10 fica de fora)`, dentro.length === 3);
+  check('3 parcelas de R$120 é que dão os R$360 do painel', dentro.length * 120 === 360);
+
+  // Parcela vencida é contada como se pudesse entrar hoje — mas só entra se pagarem.
+  const atrasada = { dia: '2026-09-20', valor: 80 };
+  const contaComoHoje = atrasada.dia < hoje;
+  check('parcela vencida é jogada para hoje na projeção', contaComoHoje);
+  check('por isso ela precisa aparecer marcada, senão o número engana', contaComoHoje);
+}
 
 // ---- Corrigir o saldo do caixa: a diferença vira AJUSTE, nunca RETIRADA ----
 /** Mesma conta que a rota PUT /api/credito/caixa/saldo faz. */

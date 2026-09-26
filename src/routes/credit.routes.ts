@@ -138,7 +138,10 @@ async function calcularRetrato() {
     }),
     prisma.creditInstallment.findMany({
       where: { contract: { status: { in: ['ACTIVE', 'DEFAULTED'] } }, status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] } },
-      select: { dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true },
+      select: {
+        dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true,
+        contract: { select: { number: true, borrower: { select: { name: true, tradeName: true } } } },
+      },
     }),
     prisma.creditContract.count({ where: { status: 'AWAITING_SIGNATURE' } }),
     // Já em vigor, mas o Pix ainda não foi confirmado como enviado.
@@ -160,18 +163,27 @@ async function calcularRetrato() {
 
   let atrasoAte30 = 0, atrasoMais30 = 0, parcelasAtrasadas = 0;
   const entradasPorDia: Record<string, number> = {};
+  // Quem forma o "entra nos próximos 7 dias". Sem esta lista o número parece
+  // ter caído do céu, e quem olha não consegue conferir.
+  const detalhe7: Array<{ dia: string; valor: number; cliente: string; contrato: string; atrasada: boolean }> = [];
+  const limite7 = addDaysYmd(hoje, 6);
   for (const i of parcelas) {
     const dia = dbDateToYmd(i.dueDate);
     const falta = num(i.amountDue) + num(i.lateCharge) - num(i.amountPaid);
     const diasAtraso = Math.round((Date.parse(`${hoje}T12:00:00Z`) - Date.parse(`${dia}T12:00:00Z`)) / 86400_000);
+    const b = i.contract.borrower;
+    const quem = b.tradeName || b.name;
     if (diasAtraso > 0) {
       parcelasAtrasadas++;
       if (diasAtraso > 30) atrasoMais30 += falta; else atrasoAte30 += falta;
       entradasPorDia[hoje] = (entradasPorDia[hoje] ?? 0) + falta; // atrasada: pode entrar hoje
+      detalhe7.push({ dia: hoje, valor: falta, cliente: quem, contrato: i.contract.number, atrasada: true });
     } else {
       entradasPorDia[dia] = (entradasPorDia[dia] ?? 0) + falta;
+      if (dia <= limite7) detalhe7.push({ dia, valor: falta, cliente: quem, contrato: i.contract.number, atrasada: false });
     }
   }
+  detalhe7.sort((a, b) => (a.dia === b.dia ? b.valor - a.valor : a.dia.localeCompare(b.dia)));
 
   // O modo depende do tamanho da carteira: carteira pequena roda mais solta.
   const settings = await getSettings();
@@ -206,7 +218,7 @@ async function calcularRetrato() {
     diasCaixaParado: caixa.disponivelParaEmprestar >= padroes.contratoMinimo ? diasCaixaParado : 0,
   });
 
-  return { caixa, saude, projecao, tarefas, principalNaRua, carteiraTotal, clientesAtivos, parcelasAtrasadas, modo, padroes };
+  return { caixa, saude, projecao, tarefas, principalNaRua, carteiraTotal, clientesAtivos, parcelasAtrasadas, modo, padroes, detalhe7, limite7 };
 }
 
 // ---------------------------------------------------------------------------
@@ -1154,6 +1166,13 @@ export async function creditRoutes(app: FastifyInstance) {
       carteira: { principalNaRua: r.principalNaRua.toFixed(2), aReceber: r.carteiraTotal.toFixed(2), clientesAtivos: r.clientesAtivos, parcelasAtrasadas: r.parcelasAtrasadas },
       modo: r.modo,
       padroes: r.padroes,
+      // O que forma o "entra nos próximos 7 dias", para conferência.
+      proximos7: {
+        ate: r.limite7,
+        total: r.projecao.totalProximos7.toFixed(2),
+        atrasado: r.detalhe7.filter((d) => d.atrasada).reduce((t, d) => t + d.valor, 0).toFixed(2),
+        parcelas: r.detalhe7.map((d) => ({ ...d, valor: d.valor.toFixed(2) })),
+      },
     };
   });
 
