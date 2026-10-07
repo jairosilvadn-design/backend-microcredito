@@ -5,7 +5,7 @@
  */
 export function ligarBanco() {
   const e = process.env;
-  const pooled = e.DATABASE_URL || e.NETLIFY_DATABASE_URL;
+  const pooled = e.DATABASE_URL || e.NETLIFY_DB_URL || e.NETLIFY_DATABASE_URL;
   const direto = e.DIRECT_URL || e.NETLIFY_DATABASE_URL_UNPOOLED || pooled;
   if (pooled) {
     // Pooler (pgbouncer) exige este parâmetro no Prisma; função serverless: 1 conexão por instância.
