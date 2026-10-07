@@ -4,6 +4,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # O build precisa do Prisma CLI e do esbuild (devDependencies), mesmo se NODE_ENV=production estiver definido.
+  NPM_FLAGS = "--include=dev"
 
 [functions]
   directory = "netlify/functions"
