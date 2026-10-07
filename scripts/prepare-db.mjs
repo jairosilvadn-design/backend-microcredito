@@ -4,7 +4,9 @@ import { execSync } from 'node:child_process';
 
 const e = process.env;
 const url = e.DATABASE_URL || e.NETLIFY_DB_URL || e.NETLIFY_DATABASE_URL;
-if (!url) { console.log('Sem banco configurado: pulando prepare-db.'); process.exit(0); }
+const achou = ['DATABASE_URL', 'NETLIFY_DB_URL', 'NETLIFY_DATABASE_URL'].filter((k) => e[k]);
+console.log(`prepare-db: variáveis de banco encontradas: ${achou.length ? achou.join(', ') : 'nenhuma'}`);
+if (!url) { console.log('Sem banco configurado: pulando prepare-db (a API vai avisar no /health).'); process.exit(0); }
 const direct = e.DIRECT_URL || e.NETLIFY_DATABASE_URL_UNPOOLED || url;
 const env = { ...e, DATABASE_URL: direct, DIRECT_URL: direct };
 
