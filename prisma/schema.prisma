@@ -594,6 +594,7 @@ model CreditContract {
 
   @@index([status])
   @@index([borrowerId, createdAt])
+  @@index([borrowerId, status])
 }
 
 /// Link público de assinatura + prova do aceite.
@@ -649,6 +650,7 @@ model CreditInstallment {
 
   @@unique([contractId, sequence])
   @@index([dueDate, status])
+  @@index([contractId, status])
 }
 
 /// Baixa manual feita pelo operador.
@@ -665,6 +667,7 @@ model CreditPayment {
   createdAt      DateTime          @default(now())
 
   @@index([paidAt])
+  @@index([installmentId])
 }
 
 /// Régua de cobrança: mensagem pronta para o operador enviar no WhatsApp.
@@ -722,4 +725,5 @@ model CashEntry {
 
   @@index([happenedAt])
   @@index([kind])
+  @@index([contractId])
 }

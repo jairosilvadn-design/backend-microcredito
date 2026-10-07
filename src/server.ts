@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
+import compress from '@fastify/compress';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
@@ -34,6 +35,7 @@ async function main() {
 
   await registerCors(app); // antes de tudo: o preflight OPTIONS precisa ser respondido
   await app.register(helmet);
+  await app.register(compress, { global: true, threshold: 1024 }); // JSON cai de ~10x no celular
   await app.register(multipart, { limits: { fileSize: 6 * 1024 * 1024, files: 1, fields: 10 } });
   await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
 

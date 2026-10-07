@@ -14,6 +14,7 @@
     "test:db": "tsx tests/ledger.db.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/http.db.test.ts"
   },
   "dependencies": {
+    "@fastify/compress": "^8.3.1",
     "@fastify/cors": "^10.1.0",
     "@fastify/helmet": "^12.0.1",
     "@fastify/multipart": "^9.4.0",

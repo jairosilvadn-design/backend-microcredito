@@ -130,7 +130,7 @@ async function saldoDoCaixa(): Promise<number> {
 let retratoCache: { em: number; dados: Awaited<ReturnType<typeof calcularRetrato>> } | null = null;
 const CACHE_MS = 20_000;
 
-export function limparCacheDoRetrato() { retratoCache = null; }
+export function limparCacheDoRetrato() { retratoCache = null; abertosCache = null; resumoCache.clear(); }
 
 async function retratoDaOperacao() {
   if (retratoCache && Date.now() - retratoCache.em < CACHE_MS) return retratoCache.dados;
@@ -222,7 +222,19 @@ async function calcularRetrato() {
 }
 
 /** Contratos em andamento já no formato do motor financeiro. */
-async function carregarContratosAbertos() {
+type Abertos = Awaited<ReturnType<typeof lerContratosAbertos>>;
+let abertosCache: { em: number; dados: Abertos } | null = null;
+const resumoCache = new Map<string, { em: number; dados: unknown }>();
+
+/** Painel, gestor e retrato usam a mesma leitura: uma ida ao banco a cada 20s, não uma por tela. */
+async function carregarContratosAbertos(): Promise<Abertos> {
+  if (abertosCache && Date.now() - abertosCache.em < CACHE_MS) return abertosCache.dados;
+  const dados = await lerContratosAbertos();
+  abertosCache = { em: Date.now(), dados };
+  return dados;
+}
+
+async function lerContratosAbertos() {
   const rows = await prisma.creditContract.findMany({
     where: { status: { in: ['ACTIVE', 'DEFAULTED'] } },
     select: {
@@ -911,28 +923,42 @@ export async function creditRoutes(app: FastifyInstance) {
 
   // --------------------------------------------------------- cobranças
   app.get('/api/credito/cobrancas', async (req) => {
-    const { date } = z.object({ date: z.string().refine(isValidYmd).optional() }).parse(req.query);
+    const { date, limit, offset } = z.object({
+      date: z.string().refine(isValidYmd).optional(),
+      limit: z.coerce.number().int().min(1).max(200).default(60),
+      offset: z.coerce.number().int().min(0).default(0),
+    }).parse(req.query);
     const today = date ?? ymdSaoPaulo();
     const settings = await getSettings();
 
     const installments = await prisma.creditInstallment.findMany({
       where: { status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] }, dueDate: { lte: ymdToDbDate(today) }, contract: { status: { in: ['ACTIVE', 'DEFAULTED'] } } },
-      include: { contract: { include: { borrower: true } } },
+      select: {
+        id: true, sequence: true, dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true, contractId: true,
+        contract: { select: { number: true, installmentsCount: true, payToPixKey: true, lateFeePercent: true, lateDailyPercent: true, borrower: { select: { id: true, name: true, tradeName: true, whatsapp: true } } } },
+      },
       orderBy: [{ dueDate: 'asc' }],
-      take: 500,
     });
 
-    const rows = installments.map((i) => {
-      const due = dbDateToYmd(i.dueDate);
-      // Mesma conta da baixa: o valor mostrado aqui é exatamente o que a baixa quita.
+    // Conta leve para TODAS (totais corretos); mensagem e link do WhatsApp só para a página pedida.
+    const calculadas = installments.map((i) => {
       const saldo = saldoDaParcela(paraParcelaFato(i), today, i.contract);
+      return { i, saldo };
+    }).filter((x) => x.saldo.falta.greaterThan(0));
+
+    const hojeRows = calculadas.filter((x) => x.saldo.diasAtraso === 0);
+    const atrasRows = calculadas.filter((x) => x.saldo.diasAtraso > 0);
+    const soma = (l: typeof calculadas) => l.reduce((t, x) => t + Number(x.saldo.falta), 0).toFixed(2);
+    const totals = { hoje: hojeRows.length, atrasadas: atrasRows.length, valorHoje: soma(hojeRows), valorAtrasado: soma(atrasRows) };
+
+    const pagina = calculadas.slice(offset, offset + limit);
+    const rows = pagina.map(({ i, saldo }) => {
+      const due = dbDateToYmd(i.dueDate);
       const lateDays = saldo.diasAtraso;
-      const charge = saldo.encargos;
       const totalDue = Number(saldo.falta.toFixed(2));
       const b = i.contract.borrower;
-      const firstName = b.name.split(' ')[0] ?? b.name;
       const message = buildMessage(lateDays > 0 ? 'ATRASO' : 'LEMBRETE', {
-        firstName, contractNumber: i.contract.number, installmentSeq: i.sequence, installmentsCount: i.contract.installmentsCount,
+        firstName: b.name.split(' ')[0] ?? b.name, contractNumber: i.contract.number, installmentSeq: i.sequence, installmentsCount: i.contract.installmentsCount,
         amount: lateDays > 0 ? Number(i.amountDue) : totalDue, dueDate: due, lateDays, totalDue, pixKey: i.contract.payToPixKey, pixOwner: settings.pixOwner,
       });
       return {
@@ -940,19 +966,12 @@ export async function creditRoutes(app: FastifyInstance) {
         borrower: { id: b.id, name: b.name, tradeName: b.tradeName, whatsapp: b.whatsapp },
         sequence: i.sequence, installmentsCount: i.contract.installmentsCount,
         dueDate: due, amountDue: money2(i.amountDue), amountPaid: money2(i.amountPaid),
-        lateDays, lateCharge: charge.toFixed(2), totalDue: totalDue.toFixed(2),
+        lateDays, lateCharge: saldo.encargos.toFixed(2), totalDue: totalDue.toFixed(2),
         status: lateDays > 0 ? 'ATRASADA' : 'HOJE',
         message, whatsappLink: waLink(b.whatsapp, message),
       };
     });
-
-    const totals = {
-      hoje: rows.filter((r) => r.status === 'HOJE').length,
-      atrasadas: rows.filter((r) => r.status === 'ATRASADA').length,
-      valorHoje: rows.filter((r) => r.status === 'HOJE').reduce((s, r) => s + Number(r.totalDue), 0).toFixed(2),
-      valorAtrasado: rows.filter((r) => r.status === 'ATRASADA').reduce((s, r) => s + Number(r.totalDue), 0).toFixed(2),
-    };
-    return { date: today, totals, rows };
+    return { date: today, totals, rows, offset, limit, total: calculadas.length, hasMore: offset + limit < calculadas.length };
   });
 
   // ------------------------------------------------------------ painel
@@ -1001,14 +1020,38 @@ export async function creditRoutes(app: FastifyInstance) {
     }).parse(req.query);
     const to = q.to ?? ymdSaoPaulo();
     const from = q.from ?? addDaysYmd(to, -29);
+    const cacheKey = `${from}|${to}`;
+    const guardado = resumoCache.get(cacheKey);
+    if (guardado && Date.now() - guardado.em < 30_000) return guardado.dados as never;
     const ini = new Date(`${from}T00:00:00.000-03:00`);
     const fim = new Date(`${to}T23:59:59.999-03:00`);
 
     const hoje = ymdSaoPaulo();
     const contratos = await prisma.creditContract.findMany({
       where: { status: { in: ['ACTIVE', 'PAID', 'DEFAULTED'] } },
-      include: { installments: { orderBy: { sequence: 'asc' }, include: { payments: { select: { amount: true, paidAt: true } } } }, borrower: { select: { id: true, name: true, tradeName: true, whatsapp: true } } },
+      // Só o que a conta usa: trazer o contrato inteiro (texto de 6 KB x centenas) deixava o resumo em 2,5 s.
+      select: {
+        id: true, number: true, status: true, principal: true, netToBorrower: true, totalPayable: true, disbursedAt: true,
+        lateFeePercent: true, lateDailyPercent: true,
+        installments: { orderBy: { sequence: 'asc' }, select: { id: true, sequence: true, dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true } },
+        borrower: { select: { id: true, name: true, tradeName: true, whatsapp: true } },
+      },
     });
+
+    // Pagamentos somados no banco (por contrato e mês), em vez de trazer cada um para a memória.
+    const somas = await prisma.$queryRaw<Array<{ contractId: string; mes: string; total: Prisma.Decimal; noPeriodo: Prisma.Decimal }>>`
+      SELECT i."contractId" AS "contractId",
+             to_char(p."paidAt" AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS mes,
+             SUM(p.amount) AS total,
+             SUM(CASE WHEN p."paidAt" BETWEEN ${ini} AND ${fim} THEN p.amount ELSE 0 END) AS "noPeriodo"
+      FROM "CreditPayment" p JOIN "CreditInstallment" i ON i.id = p."installmentId"
+      GROUP BY 1, 2`;
+    const pagamentosPorContrato = new Map<string, Array<{ mes: string; total: number; noPeriodo: number }>>();
+    for (const m of somas) {
+      const l = pagamentosPorContrato.get(m.contractId) ?? [];
+      l.push({ mes: m.mes, total: Number(m.total), noPeriodo: Number(m.noPeriodo) });
+      pagamentosPorContrato.set(m.contractId, l);
+    }
 
     let liberadoTotal = 0, liberadoPeriodo = 0;
     let recebidoTotal = 0, recebidoPeriodo = 0;
@@ -1043,14 +1086,12 @@ export async function creditRoutes(app: FastifyInstance) {
       emAtraso += num(pos.emAtraso);
       if (c.status === 'DEFAULTED') emRisco += num(pos.aReceber);
 
-      for (const i of c.installments) {
-        for (const p of i.payments) {
-          const v = num(p.amount);
-          const b = bucket(mes(p.paidAt));
-          b.recebido += v;
-          b.juros += v * parteJuros;
-          if (p.paidAt >= ini && p.paidAt <= fim) { recebidoPeriodo += v; jurosPeriodo += v * parteJuros; }
-        }
+      for (const m of pagamentosPorContrato.get(c.id) ?? []) {
+        const b = bucket(m.mes);
+        b.recebido += m.total;
+        b.juros += m.total * parteJuros;
+        recebidoPeriodo += m.noPeriodo;
+        jurosPeriodo += m.noPeriodo * parteJuros;
       }
       if (num(pos.emAtraso) > 0) {
         atrasados.push({
@@ -1065,7 +1106,7 @@ export async function creditRoutes(app: FastifyInstance) {
     const meses = [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-6)
       .map(([m, v]) => ({ mes: m, liberado: r2(v.liberado), recebido: r2(v.recebido), juros: r2(v.juros) }));
 
-    return {
+    const resultadoResumo = {
       periodo: { from, to },
       capital: {
         liberadoTotal: r2(liberadoTotal),
@@ -1089,6 +1130,8 @@ export async function creditRoutes(app: FastifyInstance) {
       meses,
       atrasados: atrasados.sort((a, b) => Number(b.dias) - Number(a.dias)).slice(0, 10),
     };
+    resumoCache.set(cacheKey, { em: Date.now(), dados: resultadoResumo });
+    return resultadoResumo;
   });
 
   /**
@@ -1192,7 +1235,17 @@ export async function creditRoutes(app: FastifyInstance) {
         ate: r.limite7,
         total: r.projecao.totalProximos7.toFixed(2),
         atrasado: r.detalhe7.filter((d) => d.atrasada).reduce((t, d) => t + d.valor, 0).toFixed(2),
-        parcelas: r.detalhe7.map((d) => ({ ...d, valor: d.valor.toFixed(2) })),
+        // Uma linha por contrato (não por parcela) e só as 40 maiores: a lista inteira passava de 700 KB no celular.
+        totalContratos: new Set(r.detalhe7.map((d) => d.contrato)).size,
+        parcelas: (() => {
+          const porContrato = new Map<string, { dia: string; valor: number; cliente: string; contrato: string; atrasada: boolean }>();
+          for (const d of r.detalhe7) {
+            const k = `${d.contrato}|${d.atrasada}`;
+            const x = porContrato.get(k);
+            if (x) x.valor += d.valor; else porContrato.set(k, { ...d });
+          }
+          return [...porContrato.values()].sort((a, b) => b.valor - a.valor).slice(0, 40).map((d) => ({ ...d, valor: d.valor.toFixed(2) }));
+        })(),
       },
     };
   });
