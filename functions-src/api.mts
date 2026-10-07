@@ -32,6 +32,10 @@ export default async (req: Request) => {
   }
 
   const url = new URL(req.url);
+  console.log(`${req.method} ${url.pathname}`);
+  if (url.pathname === '/api/__diag') {
+    return json(200, { ok: true, path: url.pathname, aplicacaoPronta: Boolean(app) });
+  }
   const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : Buffer.from(await req.arrayBuffer());
   const headers: Record<string, string> = {};
   req.headers.forEach((v, k) => { headers[k] = v; });

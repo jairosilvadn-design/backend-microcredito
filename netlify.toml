@@ -24,33 +24,4 @@
     "prisma/schema.prisma"
   ]
 
-# Rotas da API (a função também declara os mesmos caminhos; aqui garante mesmo se a leitura do arquivo gerado falhar)
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/p/*"
-  to = "/.netlify/functions/api"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/oauth/*"
-  to = "/.netlify/functions/api"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/webhooks/*"
-  to = "/.netlify/functions/api"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/health"
-  to = "/.netlify/functions/api"
-  status = 200
-  force = true
+# As rotas da API (/api/*, /p/*, /oauth/*, /webhooks/*, /health) são declaradas pela própria função (config.path em functions-src/api.mts).
