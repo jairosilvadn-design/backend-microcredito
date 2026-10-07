@@ -9,7 +9,19 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
   external_node_modules = ["@prisma/client", ".prisma/client"]
-  included_files = ["node_modules/.prisma/**", "node_modules/@prisma/client/**", "node_modules/prisma/**", "prisma/schema.prisma"]
+  # Só o necessário no runtime do Netlify (AWS Lambda, limite de ~50 MB zipado):
+  # motor do Prisma para rhel (sem o de debian, sem wasm, sem tipos) e nada da CLI do Prisma.
+  included_files = [
+    "node_modules/.prisma/client/**",
+    "!node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node",
+    "!node_modules/.prisma/client/*.wasm",
+    "!node_modules/.prisma/client/*.d.ts",
+    "!node_modules/.prisma/client/**/*.d.ts",
+    "!node_modules/@prisma/client/runtime/*.wasm",
+    "!node_modules/@prisma/client/runtime/*.d.ts",
+    "!node_modules/@prisma/client/runtime/*.d.mts",
+    "prisma/schema.prisma"
+  ]
 
 # Toda rota vai para a API; /health, /api/*, /p/* (assinatura), /oauth/* e webhooks.
 [[redirects]]
