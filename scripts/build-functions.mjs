@@ -10,7 +10,9 @@ for (const nome of ['api', 'credit-daily']) {
     outfile: `netlify/functions/${nome}.mjs`,
     bundle: true, platform: 'node', target: 'node22', format: 'esm', minify: false, legalComments: 'none',
     external: ['@prisma/client', '.prisma/client'],
-    banner: { js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);" },
+    banner: {
+      js: "import { createRequire as __cr } from 'node:module'; import { fileURLToPath as __fu } from 'node:url'; import { dirname as __dn } from 'node:path'; const require = __cr(import.meta.url); const __filename = __fu(import.meta.url); const __dirname = __dn(__filename);",
+    },
   });
   console.log(`função gerada: netlify/functions/${nome}.mjs`);
 }
