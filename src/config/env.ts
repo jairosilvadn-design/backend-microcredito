@@ -56,8 +56,10 @@ const schema = z.object({
 const parsed = schema.safeParse(process.env);
 if (!parsed.success) {
   // Falha cedo e alto: melhor não subir do que subir sem segredo.
+  const campos = Object.keys(parsed.error.flatten().fieldErrors);
   console.error('Variáveis de ambiente inválidas:', parsed.error.flatten().fieldErrors);
-  process.exit(1);
+  // Lança (em vez de process.exit): o servidor tradicional encerra do mesmo jeito; a Netlify Function consegue explicar o que falta.
+  throw new Error(`Variáveis de ambiente ausentes ou inválidas: ${campos.join(', ')}`);
 }
 
 export const env = parsed.data;
