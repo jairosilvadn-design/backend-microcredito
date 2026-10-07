@@ -14,6 +14,10 @@ import {
   MODOS, PADROES, limiteParaCliente, modoPara, projetarCaixa, recomendacoes, saudeDaCarteira, situacaoCaixa,
 } from '../services/credit/tesouraria.service';
 import { env } from '../config/env';
+import {
+  ErroDeNegocio, TX_OPTS, conferirCarteira, estornarPagamento, paraParcelaFato, posicaoDoContrato,
+  recalcularContrato, registrarBaixa, saldoDaParcela, travarContrato,
+} from '../services/credit/ledger.service';
 
 const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
 const money2 = (d: Prisma.Decimal | null | undefined) => (d == null ? null : d.toFixed(2));
@@ -43,11 +47,18 @@ async function audit(req: FastifyRequest, action: string, entity: string, entity
   });
 }
 
-/** Número sequencial do contrato: CT-2026-0007 */
-async function nextContractNumber(): Promise<string> {
+/**
+ * Número sequencial do contrato: CT-2026-0007.
+ * Parte do MAIOR número já usado (e não da contagem): contar repetia número depois
+ * de qualquer exclusão e dava "erro inesperado" na hora de gerar o contrato.
+ */
+async function nextContractNumber(skip = 0): Promise<string> {
   const year = ymdSaoPaulo().slice(0, 4);
-  const count = await prisma.creditContract.count({ where: { number: { startsWith: `CT-${year}-` } } });
-  return `CT-${year}-${String(count + 1).padStart(4, '0')}`;
+  const last = await prisma.creditContract.findFirst({
+    where: { number: { startsWith: `CT-${year}-` } }, orderBy: { number: 'desc' }, select: { number: true },
+  });
+  const seq = last ? Number(last.number.split('-')[2]) || 0 : 0;
+  return `CT-${year}-${String(seq + 1 + skip).padStart(4, '0')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,19 +141,9 @@ async function retratoDaOperacao() {
 
 async function calcularRetrato() {
   const hoje = ymdSaoPaulo();
-  const [saldo, contratos, parcelas, aguardando, pixAEnviar, prontos, ultimaLiberacao] = await Promise.all([
+  const [saldo, contratos, aguardando, pixAEnviar, prontos, ultimaLiberacao] = await Promise.all([
     saldoDoCaixa(),
-    prisma.creditContract.findMany({
-      where: { status: { in: ['ACTIVE', 'DEFAULTED'] } },
-      select: { principal: true, totalPayable: true, outstanding: true, disbursedAt: true },
-    }),
-    prisma.creditInstallment.findMany({
-      where: { contract: { status: { in: ['ACTIVE', 'DEFAULTED'] } }, status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] } },
-      select: {
-        dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true,
-        contract: { select: { number: true, borrower: { select: { name: true, tradeName: true } } } },
-      },
-    }),
+    carregarContratosAbertos(),
     prisma.creditContract.count({ where: { status: 'AWAITING_SIGNATURE' } }),
     // Já em vigor, mas o Pix ainda não foi confirmado como enviado.
     prisma.creditContract.count({ where: { status: 'ACTIVE', disbursedProof: null } }),
@@ -150,37 +151,36 @@ async function calcularRetrato() {
     prisma.cashEntry.findFirst({ where: { kind: 'LIBERACAO' }, orderBy: { happenedAt: 'desc' } }),
   ]);
 
-  // Capital na rua = parte do principal ainda não devolvida (proporcional ao pago)
   let principalNaRua = 0, carteiraTotal = 0, liberadoTotal = 0, jurosRecebidos = 0;
-  for (const c of contratos) {
-    const principal = num(c.principal), total = num(c.totalPayable), aberto = num(c.outstanding);
-    const fatia = total > 0 ? principal / total : 1;
-    principalNaRua += aberto * fatia;
-    carteiraTotal += aberto;
-    liberadoTotal += principal;
-    jurosRecebidos += (total - aberto) * (1 - fatia);
-  }
-
   let atrasoAte30 = 0, atrasoMais30 = 0, parcelasAtrasadas = 0;
   const entradasPorDia: Record<string, number> = {};
   // Quem forma o "entra nos próximos 7 dias". Sem esta lista o número parece
   // ter caído do céu, e quem olha não consegue conferir.
   const detalhe7: Array<{ dia: string; valor: number; cliente: string; contrato: string; atrasada: boolean }> = [];
   const limite7 = addDaysYmd(hoje, 6);
-  for (const i of parcelas) {
-    const dia = dbDateToYmd(i.dueDate);
-    const falta = num(i.amountDue) + num(i.lateCharge) - num(i.amountPaid);
-    const diasAtraso = Math.round((Date.parse(`${hoje}T12:00:00Z`) - Date.parse(`${dia}T12:00:00Z`)) / 86400_000);
-    const b = i.contract.borrower;
-    const quem = b.tradeName || b.name;
-    if (diasAtraso > 0) {
-      parcelasAtrasadas++;
-      if (diasAtraso > 30) atrasoMais30 += falta; else atrasoAte30 += falta;
-      entradasPorDia[hoje] = (entradasPorDia[hoje] ?? 0) + falta; // atrasada: pode entrar hoje
-      detalhe7.push({ dia: hoje, valor: falta, cliente: quem, contrato: i.contract.number, atrasada: true });
-    } else {
-      entradasPorDia[dia] = (entradasPorDia[dia] ?? 0) + falta;
-      if (dia <= limite7) detalhe7.push({ dia, valor: falta, cliente: quem, contrato: i.contract.number, atrasada: false });
+
+  for (const c of contratos) {
+    // A mesma conta do resumo e do painel (ledger.service): capital líquido, mora como lucro.
+    const pos = posicaoDoContrato(c.fato, hoje);
+    principalNaRua += num(pos.capitalNaRua);
+    carteiraTotal += num(pos.aReceber);
+    liberadoTotal += num(pos.capital);
+    jurosRecebidos += num(pos.juros);
+
+    const quem = c.borrower.tradeName || c.borrower.name;
+    for (const p of c.fato.parcelas) {
+      const s = saldoDaParcela(p, hoje, c.fato.mora);
+      const falta = num(s.falta);
+      if (falta <= 0) continue;
+      if (s.diasAtraso > 0) {
+        parcelasAtrasadas++;
+        if (s.diasAtraso > 30) atrasoMais30 += falta; else atrasoAte30 += falta;
+        entradasPorDia[hoje] = (entradasPorDia[hoje] ?? 0) + falta; // atrasada: pode entrar hoje
+        detalhe7.push({ dia: hoje, valor: falta, cliente: quem, contrato: c.number, atrasada: true });
+      } else {
+        entradasPorDia[p.dueYmd] = (entradasPorDia[p.dueYmd] ?? 0) + falta;
+        if (p.dueYmd <= limite7) detalhe7.push({ dia: p.dueYmd, valor: falta, cliente: quem, contrato: c.number, atrasada: false });
+      }
     }
   }
   detalhe7.sort((a, b) => (a.dia === b.dia ? b.valor - a.valor : a.dia.localeCompare(b.dia)));
@@ -221,6 +221,27 @@ async function calcularRetrato() {
   return { caixa, saude, projecao, tarefas, principalNaRua, carteiraTotal, clientesAtivos, parcelasAtrasadas, modo, padroes, detalhe7, limite7 };
 }
 
+/** Contratos em andamento já no formato do motor financeiro. */
+async function carregarContratosAbertos() {
+  const rows = await prisma.creditContract.findMany({
+    where: { status: { in: ['ACTIVE', 'DEFAULTED'] } },
+    select: {
+      id: true, number: true, status: true, principal: true, netToBorrower: true, totalPayable: true, disbursedAt: true,
+      lateFeePercent: true, lateDailyPercent: true,
+      borrower: { select: { name: true, tradeName: true } },
+      installments: { select: { id: true, sequence: true, dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true }, orderBy: { sequence: 'asc' } },
+    },
+  });
+  return rows.map((c) => ({
+    id: c.id, number: c.number, borrower: c.borrower, disbursedAt: c.disbursedAt,
+    fato: {
+      status: c.status, principal: c.principal, netToBorrower: c.netToBorrower, totalPayable: c.totalPayable,
+      disbursedAt: c.disbursedAt, mora: { lateFeePercent: c.lateFeePercent, lateDailyPercent: c.lateDailyPercent },
+      parcelas: c.installments.map(paraParcelaFato),
+    },
+  }));
+}
+
 // ---------------------------------------------------------------------------
 export async function creditRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireOperator);
@@ -229,6 +250,12 @@ export async function creditRoutes(app: FastifyInstance) {
     if (err instanceof z.ZodError) {
       const fields = err.issues.map((i) => `${i.path.join('.') || 'campo'}: ${i.message}`);
       return reply.code(400).send({ error: 'validation_error', message: fields.slice(0, 4).join(' · ') });
+    }
+    if (err instanceof ErroDeNegocio) return reply.code(err.status).send({ error: err.code, message: err.message });
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      if (err.code === 'P2002') return reply.code(409).send({ error: 'duplicate', message: 'Esse registro já existe (ou acabou de ser criado por outro clique). Atualize a tela e confira.' });
+      if (err.code === 'P2025') return reply.code(404).send({ error: 'not_found', message: 'Registro não encontrado.' });
+      if (err.code === 'P2028' || err.code === 'P2034') return reply.code(503).send({ error: 'busy', message: 'O banco estava ocupado e a operação não foi concluída. Nada foi gravado: tente de novo.' });
     }
     req.log.error({ err }, 'Erro no módulo de crédito');
     return reply.code(500).send({ error: 'internal_error', message: 'Erro inesperado no servidor' });
@@ -586,10 +613,8 @@ export async function creditRoutes(app: FastifyInstance) {
         avisos.push(`Cronograma combinado: as parcelas somam ${real(q.totalPayable)} em vez de ${real(esperado)}. O contrato vale pelo que está nas parcelas.`);
       }
     }
-    const number = await nextContractNumber();
     const issuedAt = new Date();
-
-    const text = buildContractText({
+    const montarTexto = (number: string) => buildContractText({
       number,
       lender: { name: settings.companyName, document: settings.companyDocument, address: settings.companyAddress, pixKey: settings.pixKey, pixKeyLabel: settings.pixKeyLabel, regime: settings.regime, partnerName: settings.partnerName, legalReviewer: settings.legalReviewer, legalReviewerOab: settings.legalReviewerOab },
       borrower: {
@@ -605,7 +630,15 @@ export async function creditRoutes(app: FastifyInstance) {
     });
 
     const token = randomBytes(32).toString('base64url');
-    const contract = await prisma.creditContract.create({
+    // Duas pessoas gerando contrato ao mesmo tempo disputam o mesmo número: tenta o seguinte.
+    let number = '';
+    let text = '';
+    let contract: Awaited<ReturnType<typeof prisma.creditContract.create>> | null = null;
+    for (let tentativa = 0; tentativa < 5 && !contract; tentativa++) {
+      number = await nextContractNumber(tentativa);
+      text = montarTexto(number);
+      try {
+        contract = await prisma.creditContract.create({
       data: {
         number, borrowerId: b.id, levelId: level?.id ?? null,
         principal: D(q.principal), ratePercent: D(rate), totalPayable: D(q.totalPayable),
@@ -623,10 +656,15 @@ export async function creditRoutes(app: FastifyInstance) {
         // As parcelas nascem junto do contrato: são exatamente as datas e os
         // valores que o cliente lê e assina. Depois disso não mudam sozinhas.
         installments: {
-          create: q.dueDates.map((d, idx) => ({ sequence: idx + 1, dueDate: ymdToDbDate(d), amountDue: D(q.amounts[idx]!) })),
+          createMany: { data: q.dueDates.map((d, idx) => ({ sequence: idx + 1, dueDate: ymdToDbDate(d), amountDue: D(q.amounts[idx]!) })) },
         },
       },
-    });
+        });
+      } catch (e) {
+        if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002' && tentativa < 4)) throw e;
+      }
+    }
+    if (!contract) throw new ErroDeNegocio('numero_ocupado', 'Não consegui reservar o número do contrato. Tente de novo.', 503);
 
     const link = `${env.APP_PUBLIC_URL}/assinatura.html?t=${token}`;
     const message = buildMessage('PROPOSTA', { firstName: b.name.split(' ')[0] ?? b.name, contractNumber: number, link });
@@ -694,11 +732,18 @@ export async function creditRoutes(app: FastifyInstance) {
         link: c.signature.acceptedAt ? null : `${env.APP_PUBLIC_URL}/assinatura.html?t=${c.signature.token}`,
       } : null,
       documents: c.documents,
-      installments: c.installments.map((i) => ({
-        id: i.id, sequence: i.sequence, dueDate: dbDateToYmd(i.dueDate), amountDue: money2(i.amountDue),
-        amountPaid: money2(i.amountPaid), lateCharge: money2(i.lateCharge), status: i.status, paidAt: i.paidAt,
-        payments: i.payments.map((p) => ({ id: p.id, amount: money2(p.amount), paidAt: p.paidAt, method: p.method, note: p.note })),
-      })),
+      // Saldo "hoje": o mesmo número que a cobrança mostra e que a baixa quita.
+      aReceberHoje: c.installments.reduce((t, i) => t.plus(saldoDaParcela(paraParcelaFato(i), ymdSaoPaulo(), c).falta), D(0)).toFixed(2),
+      totalPago: c.installments.reduce((t, i) => t.plus(i.amountPaid), D(0)).toFixed(2),
+      installments: c.installments.map((i) => {
+        const saldo = saldoDaParcela(paraParcelaFato(i), ymdSaoPaulo(), c);
+        return {
+          id: i.id, sequence: i.sequence, dueDate: dbDateToYmd(i.dueDate), amountDue: money2(i.amountDue),
+          amountPaid: money2(i.amountPaid), lateCharge: money2(i.lateCharge), status: i.status, paidAt: i.paidAt,
+          lateChargeHoje: saldo.encargos.toFixed(2), faltaHoje: saldo.falta.toFixed(2), diasAtraso: saldo.diasAtraso,
+          payments: i.payments.map((p) => ({ id: p.id, amount: money2(p.amount), paidAt: p.paidAt, method: p.method, note: p.note })),
+        };
+      }),
     };
   });
 
@@ -792,6 +837,11 @@ export async function creditRoutes(app: FastifyInstance) {
     }
 
     await prisma.$transaction(async (tx) => {
+      await travarContrato(tx, id);
+      const pagou = await tx.creditPayment.aggregate({ _sum: { amount: true }, where: { installment: { contractId: id } } });
+      if ((pagou._sum.amount ?? D(0)).greaterThan(0)) {
+        throw new ErroDeNegocio('ja_tem_pagamento', 'Entrou um pagamento neste contrato agora há pouco. Não dá para cancelar: quite ou renegocie as parcelas que faltam.');
+      }
       await tx.creditContract.update({ where: { id }, data: { status: 'CANCELLED', outstanding: D(0) } });
       // Se o dinheiro já tinha saído do caixa na assinatura, ele volta.
       const saida = await tx.cashEntry.findFirst({ where: { contractId: id, kind: 'LIBERACAO' } });
@@ -805,7 +855,7 @@ export async function creditRoutes(app: FastifyInstance) {
         });
       }
       await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'LEAD' } });
-    });
+    }, TX_OPTS);
 
     limparCacheDoRetrato();
     await audit(req, 'credit.contract.cancel', 'CreditContract', id, { reason, estornado: true });
@@ -823,81 +873,40 @@ export async function creditRoutes(app: FastifyInstance) {
       note: z.string().trim().max(300).optional(),
     }).parse(req.body ?? {});
 
-    const inst = await prisma.creditInstallment.findUnique({ where: { id }, include: { contract: { include: { borrower: true, installments: true } } } });
-    if (!inst) return reply.code(404).send({ error: 'not_found', message: 'Parcela não encontrada' });
-    if (inst.contract.status !== 'ACTIVE') return reply.code(409).send({ error: 'contract_not_active', message: 'O contrato não está ativo.' });
-    if (inst.status === 'PAID') return reply.code(409).send({ error: 'already_paid', message: 'Esta parcela já está baixada.' });
-
-    const remaining = inst.amountDue.plus(inst.lateCharge).minus(inst.amountPaid);
-    const amount = D(body.amount ?? Number(remaining.toFixed(2)));
-    const paidAt = body.paidAt ? new Date(`${body.paidAt}T12:00:00.000-03:00`) : new Date();
-
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.creditPayment.create({
-        data: { installmentId: id, amount, paidAt, method: body.method, receiptRef: body.receiptRef ?? null, note: body.note ?? null, operatorId: req.operator!.id },
-      });
-      const newPaid = inst.amountPaid.plus(amount);
-      const target = inst.amountDue.plus(inst.lateCharge);
-      const settled = newPaid.greaterThanOrEqualTo(target.minus(0.01));
-      await tx.creditInstallment.update({
-        where: { id },
-        data: { amountPaid: newPaid, status: settled ? 'PAID' : 'PARTIAL', paidAt: settled ? paidAt : null },
-      });
-
-      // Entrou dinheiro no caixa.
-      await tx.cashEntry.create({
-        data: {
-          kind: 'RECEBIMENTO', amount, happenedAt: paidAt,
-          description: `Parcela ${inst.sequence} do contrato ${inst.contract.number} — ${inst.contract.borrower.name}`,
-          contractId: inst.contractId, borrowerId: inst.contract.borrowerId, operatorId: req.operator!.id,
-        },
-      });
-
-      const contract = await tx.creditContract.findUniqueOrThrow({ where: { id: inst.contractId }, include: { installments: true } });
-      const outstanding = contract.installments.reduce((acc, i) => {
-        const paid = i.id === id ? newPaid : i.amountPaid;
-        const due = i.amountDue.plus(i.lateCharge);
-        const left = due.minus(paid);
-        return acc.plus(left.greaterThan(0) ? left : D(0));
-      }, D(0));
-
-      const finished = outstanding.lessThanOrEqualTo(0.01);
-      await tx.creditContract.update({
-        where: { id: contract.id },
-        data: { outstanding: finished ? D(0) : outstanding.toDecimalPlaces(2), status: finished ? 'PAID' : contract.status, paidAt: finished ? new Date() : null },
-      });
-
-      let levelUp: string | null = null;
-      if (finished) {
-        // Quitou: sobe um nível se o contrato não teve mais de 2 parcelas atrasadas.
-        const lateCount = contract.installments.filter((i) => Number(i.lateCharge) > 0).length;
-        const borrower = await tx.borrower.findUniqueOrThrow({ where: { id: contract.borrowerId }, include: { level: true } });
-        const nextRank = (borrower.level?.rank ?? 1) + 1;
-        const next = lateCount <= 2 ? await tx.creditLevel.findFirst({ where: { rank: nextRank, active: true } }) : null;
-        await tx.borrower.update({
-          where: { id: borrower.id },
-          data: { status: 'EM_DIA', cyclesPaid: { increment: 1 }, ...(next ? { levelId: next.id } : {}) },
-        });
-        if (next) levelUp = next.name;
-
-        await tx.creditNotification.create({
-          data: {
-            borrowerId: borrower.id, contractId: contract.id, kind: 'QUITACAO', referenceDate: ymdToDbDate(ymdSaoPaulo()),
-            message: buildMessage('QUITACAO', { firstName: borrower.name.split(' ')[0] ?? borrower.name, contractNumber: contract.number }),
-          },
-        });
-      }
-
-      // Se a parcela ficou quitada, encerra qualquer aviso pendente dela.
-      if (settled) {
-        await tx.creditNotification.updateMany({ where: { installmentId: id, status: 'PENDENTE' }, data: { status: 'DISPENSADA' } });
-      }
-      return { settled, finished, levelUp, outstanding: finished ? '0.00' : outstanding.toFixed(2) };
+    const result = await registrarBaixa(prisma, {
+      parcelaId: id, valor: body.amount, paidAtYmd: body.paidAt, method: body.method,
+      receiptRef: body.receiptRef, note: body.note, operatorId: req.operator!.id,
     });
 
     limparCacheDoRetrato();
-    await audit(req, 'credit.payment.register', 'CreditInstallment', id, { amount: amount.toFixed(2), method: body.method });
+    await audit(req, 'credit.payment.register', 'CreditInstallment', id, {
+      amount: result.recebido, method: body.method, alocacoes: result.alocacoes,
+    });
     return result;
+  });
+
+  /** Desfaz um pagamento lançado por engano (admin). O caixa é estornado e o contrato recalculado. */
+  app.post('/api/credito/pagamentos/:id/estornar', { preHandler: requireAdmin }, async (req) => {
+    const { id } = z.object({ id: uuid }).parse(req.params);
+    const { motivo } = z.object({ motivo: z.string().trim().min(3).max(200) }).parse(req.body);
+    const r = await estornarPagamento(prisma, { paymentId: id, motivo, operatorId: req.operator!.id });
+    limparCacheDoRetrato();
+    await audit(req, 'credit.payment.reverse', 'CreditPayment', id, { motivo, valor: r.valorEstornado });
+    return r;
+  });
+
+  /**
+   * Conferência da carteira: compara o que está gravado com o que os pagamentos provam.
+   * Sem parâmetro só mostra as diferenças; com ?corrigir=true refaz saldos e acerta o caixa.
+   */
+  app.post('/api/credito/conferir', { preHandler: requireAdmin }, async (req) => {
+    const { corrigir } = z.object({ corrigir: z.enum(['true', 'false']).default('false') }).parse(req.query);
+    const r = await conferirCarteira(prisma, { corrigir: corrigir === 'true', operatorId: req.operator!.id });
+    if (corrigir === 'true') {
+      limparCacheDoRetrato();
+      await audit(req, 'credit.conferencia.corrigir', 'Carteira', 'all', { divergencias: r.divergencias.length });
+    }
+    return r;
   });
 
   // --------------------------------------------------------- cobranças
@@ -907,7 +916,7 @@ export async function creditRoutes(app: FastifyInstance) {
     const settings = await getSettings();
 
     const installments = await prisma.creditInstallment.findMany({
-      where: { status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] }, dueDate: { lte: ymdToDbDate(today) }, contract: { status: 'ACTIVE' } },
+      where: { status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] }, dueDate: { lte: ymdToDbDate(today) }, contract: { status: { in: ['ACTIVE', 'DEFAULTED'] } } },
       include: { contract: { include: { borrower: true } } },
       orderBy: [{ dueDate: 'asc' }],
       take: 500,
@@ -915,14 +924,16 @@ export async function creditRoutes(app: FastifyInstance) {
 
     const rows = installments.map((i) => {
       const due = dbDateToYmd(i.dueDate);
-      const lateDays = Math.max(0, Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${due}T12:00:00Z`)) / 86400_000));
-      const charge = lateCharge(i.amountDue, lateDays, i.contract.lateFeePercent, i.contract.lateDailyPercent);
-      const totalDue = Number(i.amountDue.plus(charge).minus(i.amountPaid).toFixed(2));
+      // Mesma conta da baixa: o valor mostrado aqui é exatamente o que a baixa quita.
+      const saldo = saldoDaParcela(paraParcelaFato(i), today, i.contract);
+      const lateDays = saldo.diasAtraso;
+      const charge = saldo.encargos;
+      const totalDue = Number(saldo.falta.toFixed(2));
       const b = i.contract.borrower;
       const firstName = b.name.split(' ')[0] ?? b.name;
       const message = buildMessage(lateDays > 0 ? 'ATRASO' : 'LEMBRETE', {
         firstName, contractNumber: i.contract.number, installmentSeq: i.sequence, installmentsCount: i.contract.installmentsCount,
-        amount: Number(i.amountDue), dueDate: due, lateDays, totalDue, pixKey: i.contract.payToPixKey, pixOwner: settings.pixOwner,
+        amount: lateDays > 0 ? Number(i.amountDue) : totalDue, dueDate: due, lateDays, totalDue, pixKey: i.contract.payToPixKey, pixOwner: settings.pixOwner,
       });
       return {
         installmentId: i.id, contractId: i.contractId, contractNumber: i.contract.number,
@@ -946,23 +957,33 @@ export async function creditRoutes(app: FastifyInstance) {
 
   // ------------------------------------------------------------ painel
   app.get('/api/credito/painel', async () => {
-    const today = ymdToDbDate(ymdSaoPaulo());
-    const [borrowers, active, awaiting, overdueInst, dueToday, paidToday, carteira] = await Promise.all([
+    const hoje = ymdSaoPaulo();
+    const [borrowers, active, awaiting, paidToday, abertos] = await Promise.all([
       prisma.borrower.count(),
       prisma.creditContract.count({ where: { status: 'ACTIVE' } }),
       prisma.creditContract.count({ where: { status: { in: ['AWAITING_SIGNATURE', 'SIGNED'] } } }),
-      prisma.creditInstallment.count({ where: { status: 'OVERDUE', contract: { status: 'ACTIVE' } } }),
-      prisma.creditInstallment.aggregate({ _sum: { amountDue: true }, where: { dueDate: today, status: { in: ['PENDING', 'PARTIAL'] } } }),
-      prisma.creditPayment.aggregate({ _sum: { amount: true }, where: { paidAt: { gte: new Date(`${ymdSaoPaulo()}T00:00:00.000-03:00`) } } }),
-      prisma.creditContract.aggregate({ _sum: { outstanding: true, principal: true }, where: { status: 'ACTIVE' } }),
+      prisma.creditPayment.aggregate({ _sum: { amount: true }, where: { paidAt: { gte: new Date(`${hoje}T00:00:00.000-03:00`), lt: new Date(`${addDaysYmd(hoje, 1)}T00:00:00.000-03:00`) } } }),
+      carregarContratosAbertos(),
     ]);
 
+    // Tudo sai do mesmo cálculo do gestor e do resumo: os números fecham entre as telas.
+    let outstanding = 0, principalOut = 0, overdueInstallments = 0, dueToday = 0;
+    for (const c of abertos) {
+      const pos = posicaoDoContrato(c.fato, hoje);
+      outstanding += num(pos.aReceber);
+      principalOut += num(pos.capitalNaRua);
+      overdueInstallments += pos.parcelasAtrasadas;
+      for (const p of c.fato.parcelas) {
+        if (p.dueYmd === hoje) dueToday += num(saldoDaParcela(p, hoje, c.fato.mora).falta);
+      }
+    }
+    const r2 = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
     return {
-      borrowers, activeContracts: active, awaitingSignature: awaiting, overdueInstallments: overdueInst,
-      dueToday: money2(dueToday._sum.amountDue) ?? '0.00',
+      borrowers, activeContracts: active, awaitingSignature: awaiting, overdueInstallments,
+      dueToday: r2(dueToday),
       receivedToday: money2(paidToday._sum.amount) ?? '0.00',
-      outstanding: money2(carteira._sum.outstanding) ?? '0.00',
-      principalOut: money2(carteira._sum.principal) ?? '0.00',
+      outstanding: r2(outstanding),
+      principalOut: r2(principalOut),
     };
   });
 
@@ -983,14 +1004,15 @@ export async function creditRoutes(app: FastifyInstance) {
     const ini = new Date(`${from}T00:00:00.000-03:00`);
     const fim = new Date(`${to}T23:59:59.999-03:00`);
 
+    const hoje = ymdSaoPaulo();
     const contratos = await prisma.creditContract.findMany({
       where: { status: { in: ['ACTIVE', 'PAID', 'DEFAULTED'] } },
-      include: { installments: { include: { payments: true } }, borrower: { select: { id: true, name: true, tradeName: true, whatsapp: true } } },
+      include: { installments: { orderBy: { sequence: 'asc' }, include: { payments: { select: { amount: true, paidAt: true } } } }, borrower: { select: { id: true, name: true, tradeName: true, whatsapp: true } } },
     });
 
     let liberadoTotal = 0, liberadoPeriodo = 0;
     let recebidoTotal = 0, recebidoPeriodo = 0;
-    let principalRecuperado = 0, jurosRecebidos = 0, jurosPeriodo = 0;
+    let principalRecuperado = 0, jurosRecebidos = 0, jurosPeriodo = 0, capitalNaRuaTotal = 0;
     let aReceber = 0, jurosPrevistos = 0, emAtraso = 0, emRisco = 0;
     const porMes = new Map<string, { liberado: number; recebido: number; juros: number }>();
     const mes = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d).slice(0, 7);
@@ -999,53 +1021,47 @@ export async function creditRoutes(app: FastifyInstance) {
     const atrasados: Array<Record<string, string | number>> = [];
 
     for (const c of contratos) {
-      const principal = num(c.principal);
-      const total = num(c.totalPayable);
-      const fatiaPrincipal = total > 0 ? principal / total : 1;
+      // Mesma conta do gestor e do painel (ledger.service).
+      const pos = posicaoDoContrato({
+        status: c.status, principal: c.principal, netToBorrower: c.netToBorrower, totalPayable: c.totalPayable, disbursedAt: c.disbursedAt,
+        mora: { lateFeePercent: c.lateFeePercent, lateDailyPercent: c.lateDailyPercent }, parcelas: c.installments.map(paraParcelaFato),
+      }, hoje);
+      const capital = num(pos.capital), recebido = num(pos.recebido);
+      const parteJuros = recebido > 0 ? num(pos.juros) / recebido : 0; // fatia do recebido que é lucro
 
       if (c.disbursedAt) {
-        liberadoTotal += principal;
-        bucket(mes(c.disbursedAt)).liberado += principal;
-        if (c.disbursedAt >= ini && c.disbursedAt <= fim) liberadoPeriodo += principal;
+        liberadoTotal += capital;
+        bucket(mes(c.disbursedAt)).liberado += capital;
+        if (c.disbursedAt >= ini && c.disbursedAt <= fim) liberadoPeriodo += capital;
       }
+      recebidoTotal += recebido;
+      principalRecuperado += num(pos.capitalVoltou);
+      jurosRecebidos += num(pos.juros);
+      capitalNaRuaTotal += num(pos.capitalNaRua);
+      aReceber += num(pos.aReceber);
+      jurosPrevistos += num(pos.jurosPrevistos);
+      emAtraso += num(pos.emAtraso);
+      if (c.status === 'DEFAULTED') emRisco += num(pos.aReceber);
 
-      let pagoContrato = 0, atrasoContrato = 0, maxDiasAtraso = 0;
       for (const i of c.installments) {
         for (const p of i.payments) {
           const v = num(p.amount);
-          pagoContrato += v;
-          recebidoTotal += v;
-          principalRecuperado += v * fatiaPrincipal;
-          jurosRecebidos += v * (1 - fatiaPrincipal);
           const b = bucket(mes(p.paidAt));
           b.recebido += v;
-          b.juros += v * (1 - fatiaPrincipal);
-          if (p.paidAt >= ini && p.paidAt <= fim) { recebidoPeriodo += v; jurosPeriodo += v * (1 - fatiaPrincipal); }
-        }
-        if (i.status === 'OVERDUE') {
-          const falta = num(i.amountDue) + num(i.lateCharge) - num(i.amountPaid);
-          atrasoContrato += Math.max(0, falta);
-          const dias = Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${dbDateToYmd(i.dueDate)}T12:00:00Z`)) / 86400_000);
-          maxDiasAtraso = Math.max(maxDiasAtraso, dias);
+          b.juros += v * parteJuros;
+          if (p.paidAt >= ini && p.paidAt <= fim) { recebidoPeriodo += v; jurosPeriodo += v * parteJuros; }
         }
       }
-
-      if (c.status === 'ACTIVE' || c.status === 'DEFAULTED') {
-        aReceber += num(c.outstanding);
-        jurosPrevistos += Math.max(0, total - principal - (pagoContrato * (1 - fatiaPrincipal)));
-        emAtraso += atrasoContrato;
-        if (c.status === 'DEFAULTED') emRisco += num(c.outstanding);
-      }
-      if (atrasoContrato > 0) {
+      if (num(pos.emAtraso) > 0) {
         atrasados.push({
           contractId: c.id, number: c.number, cliente: c.borrower.tradeName ?? c.borrower.name,
-          whatsapp: c.borrower.whatsapp, valor: atrasoContrato.toFixed(2), dias: maxDiasAtraso,
+          whatsapp: c.borrower.whatsapp, valor: num(pos.emAtraso).toFixed(2), dias: pos.maxDiasAtraso,
         });
       }
     }
 
     const r2 = (n: number) => Math.round(n * 100) / 100;
-    const capitalNaRua = r2(liberadoTotal - principalRecuperado);
+    const capitalNaRua = r2(capitalNaRuaTotal);
     const meses = [...porMes.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-6)
       .map(([m, v]) => ({ mes: m, liberado: r2(v.liberado), recebido: r2(v.recebido), juros: r2(v.juros) }));
 
@@ -1093,6 +1109,7 @@ export async function creditRoutes(app: FastifyInstance) {
     const inst = await prisma.creditInstallment.findUnique({ where: { id }, include: { contract: true } });
     if (!inst) return reply.code(404).send({ error: 'not_found', message: 'Parcela não encontrada' });
     if (inst.status === 'PAID') return reply.code(409).send({ error: 'ja_paga', message: 'Esta parcela já está paga.' });
+    if (!['ACTIVE', 'DEFAULTED'].includes(inst.contract.status)) return reply.code(409).send({ error: 'contract_not_active', message: 'O contrato não está em andamento.' });
 
     const hoje = ymdSaoPaulo();
     const vencimento = dbDateToYmd(inst.dueDate);
@@ -1115,23 +1132,27 @@ export async function creditRoutes(app: FastifyInstance) {
     });
     if (repetida) return reply.code(422).send({ error: 'data_ocupada', message: `Já existe a parcela ${repetida.sequence} nesse dia. Escolha outra data.` });
 
+    if (novoValor.lessThanOrEqualTo(inst.amountPaid)) {
+      return reply.code(422).send({ error: 'valor_baixo', message: `A parcela já recebeu ${real(Number(inst.amountPaid))}. O novo valor precisa ser maior que isso.` });
+    }
+
     await prisma.$transaction(async (tx) => {
+      await travarContrato(tx, inst.contractId);
+      const atual = await tx.creditInstallment.findUniqueOrThrow({ where: { id } });
+      if (atual.status === 'PAID' || !atual.amountDue.equals(inst.amountDue) || !atual.amountPaid.equals(inst.amountPaid)) {
+        throw new ErroDeNegocio('mudou', 'A parcela mudou enquanto você editava (alguém registrou um pagamento). Atualize a tela e confira.');
+      }
       await tx.creditInstallment.update({
         where: { id },
         data: {
           dueDate: ymdToDbDate(novaData), amountDue: novoValor,
-          status: novaData > hoje ? 'PENDING' : inst.status === 'OVERDUE' ? 'OVERDUE' : 'PENDING',
           lateCharge: D(0), // já foi incorporado ao valor da parcela
         },
       });
-      const parcelas = await tx.creditInstallment.findMany({ where: { contractId: inst.contractId } });
-      const aberto = parcelas.reduce((soma, p) => {
-        const falta = p.amountDue.plus(p.lateCharge).minus(p.amountPaid);
-        return soma.plus(falta.greaterThan(0) ? falta : D(0));
-      }, D(0));
-      await tx.creditContract.update({ where: { id: inst.contractId }, data: { outstanding: aberto.toDecimalPlaces(2) } });
+      // Situação da parcela, saldo do contrato e semáforo do cliente saem do motor financeiro.
+      await recalcularContrato(tx, inst.contractId);
       await tx.creditNotification.updateMany({ where: { installmentId: id, status: 'PENDENTE' }, data: { status: 'DISPENSADA' } });
-    });
+    }, TX_OPTS);
 
     limparCacheDoRetrato();
     await audit(req, 'credit.installment.renegotiate', 'CreditInstallment', id, {
@@ -1287,7 +1308,8 @@ export async function creditRoutes(app: FastifyInstance) {
     if (!entrada) return reply.code(404).send({ error: 'not_found', message: 'Lançamento não encontrado.' });
 
     const manuais = ['APORTE', 'RETIRADA', 'DESPESA', 'AJUSTE'];
-    if (!manuais.includes(entrada.kind)) {
+    // Ajustes ligados a contrato (estorno de liberação, estorno de pagamento, conferência) fazem parte da prova do contrato.
+    if (!manuais.includes(entrada.kind) || entrada.contractId) {
       return reply.code(409).send({
         error: 'lancamento_de_contrato',
         message: 'Este lançamento veio de um contrato (liberação ou recebimento). Para desfazer, cancele ou acerte o contrato — assim o caixa e a carteira continuam batendo.',

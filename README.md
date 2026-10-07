@@ -49,3 +49,20 @@ e informe o nome em WHATSAPP_TEMPLATE_COBRANCA. Sem isso, o dashboard mostra o b
 1. Adicione a nova chave: `TOKEN_ENC_KEYS=v1:CHAVE_ANTIGA,v2:CHAVE_NOVA`
 2. Troque `TOKEN_ENC_ACTIVE_KID=v2`
 3. Tokens são regravados com a v2 na próxima leitura/renovação. Remova a v1 só depois que nenhum registro começar com "v1.".
+
+## Crédito: regras financeiras (motor único)
+
+Toda conta de saldo, baixa e relatório sai de `src/services/credit/ledger.service.ts`.
+
+- **Mora**: multa (uma vez) + juros ao dia sobre o valor da parcela, do vencimento até o dia do pagamento (ou hoje, se aberta). Parcela quitada congela a mora.
+- **Baixa**: abate primeiro a mora, depois a parcela. Sem valor informado, quita a parcela com a mora do dia (o mesmo número da tela de cobranças). Valor maior que a parcela transborda para as próximas; maior que o saldo do contrato é recusado.
+- **Caixa**: cada pagamento = 1 lançamento `RECEBIMENTO`; estorno = lançamento inverso. Lançamentos de contrato não podem ser apagados.
+- **Capital / lucro**: capital = valor líquido que saiu do caixa. Recebido = capital que voltou + lucro (mora é 100% lucro). Painel, gestor e resumo usam a mesma função (`posicaoDoContrato`).
+- **Concorrência**: baixa, estorno, renegociação, cancelamento e régua diária travam a linha do contrato (`SELECT … FOR UPDATE`); o aceite da assinatura só grava uma vez.
+
+Rotas novas (admin): `POST /api/credito/pagamentos/:id/estornar` e `POST /api/credito/conferir[?corrigir=true]`
+(a conferência compara parcelas, saldo e caixa com os pagamentos e, com `corrigir=true`, refaz os saldos e lança ajustes de caixa rastreáveis).
+
+## Testes
+- `npm test` — lógica pura (sem banco).
+- `npm run test:db` — integração em **Postgres local descartável** (`DATABASE_URL`/`DIRECT_URL` apontando para localhost; o teste recusa outros hosts e apaga as tabelas de crédito).
