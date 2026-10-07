@@ -10,9 +10,17 @@ let proxy: ReturnType<typeof awsLambdaFastify> | null = null;
 export const handler: Handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false; // não segura a resposta por conexões abertas
   if (!proxy) {
-    const { buildApp } = await import('../../src/app');
-    const app = await buildApp();
-    proxy = awsLambdaFastify(app, { binaryMimeTypes: ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/heic'] });
+    try {
+      const { buildApp } = await import('../../src/app');
+      const app = await buildApp();
+      proxy = awsLambdaFastify(app, { binaryMimeTypes: ['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/heic'] });
+    } catch (err) {
+      // Mostra só os NOMES das variáveis com problema (nunca valores), em vez de derrubar a função sem explicação.
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Falha ao iniciar a API:', msg);
+      const seguro = /^Variáveis de ambiente/.test(msg) ? msg : 'Falha ao iniciar a API. Veja os logs da função no Netlify.';
+      return { statusCode: 503, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ error: 'startup_failed', message: seguro }) };
+    }
   }
   return proxy(event, context);
 };
