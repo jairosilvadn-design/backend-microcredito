@@ -14,7 +14,6 @@
     "test:db": "tsx tests/ledger.db.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/http.db.test.ts"
   },
   "dependencies": {
-    "@fastify/aws-lambda": "^6.4.1",
     "@fastify/compress": "^8.3.1",
     "@fastify/cors": "^10.1.0",
     "@fastify/helmet": "^12.0.1",
@@ -28,9 +27,9 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.164",
     "@types/node": "^22.9.0",
     "@types/node-cron": "^3.0.11",
+    "esbuild": "^0.28.2",
     "pino": "^10.4.0",
     "prisma": "^6.0.0",
     "tsx": "^4.19.2",

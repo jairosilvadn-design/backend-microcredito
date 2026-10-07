@@ -1,5 +1,5 @@
 [build]
-  command = "npx prisma generate && node scripts/prepare-db.mjs"
+  command = "npx prisma generate && node scripts/build-functions.mjs && node scripts/prepare-db.mjs"
   publish = "public"
 
 [build.environment]
@@ -7,7 +7,6 @@
 
 [functions]
   directory = "netlify/functions"
-  node_bundler = "esbuild"
   external_node_modules = ["@prisma/client", ".prisma/client"]
   # Só o necessário no runtime do Netlify (AWS Lambda, limite de ~50 MB zipado):
   # motor do Prisma para rhel (sem o de debian, sem wasm, sem tipos) e nada da CLI do Prisma.
@@ -23,7 +22,7 @@
     "prisma/schema.prisma"
   ]
 
-# Toda rota vai para a API; /health, /api/*, /p/* (assinatura), /oauth/* e webhooks.
+# Rotas da API (a função também declara os mesmos caminhos; aqui garante mesmo se a leitura do arquivo gerado falhar)
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api"
