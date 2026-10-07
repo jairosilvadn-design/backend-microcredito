@@ -66,3 +66,5 @@ Rotas novas (admin): `POST /api/credito/pagamentos/:id/estornar` e `POST /api/cr
 ## Testes
 - `npm test` — lógica pura (sem banco).
 - `npm run test:db` — integração em **Postgres local descartável** (`DATABASE_URL`/`DIRECT_URL` apontando para localhost; o teste recusa outros hosts e apaga as tabelas de crédito).
+
+<!-- deploy: variáveis de ambiente do Netlify configuradas -->
