@@ -160,7 +160,11 @@ export function quote(i: QuoteInput): Quote {
   // O CET é calculado sobre o que o cliente REALMENTE recebe: é assim que o
   // custo das tarifas aparece na taxa, como exige a regra dos bancos.
   const liquido = i.costs ? i.costs.netToBorrower : i.principal;
-  const cet = cetMonthly(liquido, dueDates, amounts);
+  // O dinheiro sai hoje; se a primeira parcela já está no passado (simulação antiga), a
+  // contagem parte do dia anterior a ela — nunca "hoje", que daria prazo zero e custo absurdo.
+  const hoje = ymdSaoPaulo();
+  const inicio = dueDates[0]! > hoje ? hoje : addDaysYmd(dueDates[0]!, -1);
+  const cet = cetMonthly(liquido, dueDates, amounts, inicio);
 
   return {
     principal: round2(i.principal),

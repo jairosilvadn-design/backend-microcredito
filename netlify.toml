@@ -1,0 +1,43 @@
+[build]
+  command = "npx prisma generate && node scripts/prepare-db.mjs"
+  publish = "public"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+  external_node_modules = ["@prisma/client", ".prisma/client"]
+  included_files = ["node_modules/.prisma/**", "node_modules/@prisma/client/**", "node_modules/prisma/**", "prisma/schema.prisma"]
+
+# Toda rota vai para a API; /health, /api/*, /p/* (assinatura), /oauth/* e webhooks.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/p/*"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/oauth/*"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/webhooks/*"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/health"
+  to = "/.netlify/functions/api"
+  status = 200
+  force = true

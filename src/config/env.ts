@@ -18,13 +18,13 @@ const schema = z.object({
   // Opcional: regex para deploy previews do Netlify
   CORS_ORIGIN_REGEX: z.string().optional(),
 
-  MP_CLIENT_ID: z.string().min(1),
-  MP_CLIENT_SECRET: z.string().min(1),
-  MP_REDIRECT_URI: z.string().url(),
+  MP_CLIENT_ID: z.string().min(1).default('nao-configurado'), // Mercado Pago é opcional: o módulo de crédito não usa
+  MP_CLIENT_SECRET: z.string().min(1).default('nao-configurado'),
+  MP_REDIRECT_URI: z.string().url().default('https://nao-configurado.invalid/cb'),
   MP_AUTH_BASE_URL: z.string().url().default('https://auth.mercadopago.com.br/authorization'),
-  MP_WEBHOOK_SECRET: z.string().min(1),
-  MP_PLATFORM_ACCESS_TOKEN: z.string().min(1),
-  MP_PLATFORM_USER_ID: z.string().regex(/^\d+$/).transform((v) => BigInt(v)),
+  MP_WEBHOOK_SECRET: z.string().min(1).default('nao-configurado'), // sem segredo real, todo webhook é recusado
+  MP_PLATFORM_ACCESS_TOKEN: z.string().min(1).default('nao-configurado'),
+  MP_PLATFORM_USER_ID: z.string().regex(/^\d+$/).default('0').transform((v) => BigInt(v)),
 
   TOKEN_ENC_KEYS: z.string().min(1),
   TOKEN_ENC_ACTIVE_KID: z.string().regex(/^[a-zA-Z0-9_-]+$/),

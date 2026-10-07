@@ -9,6 +9,7 @@ import { getSettings } from '../services/credit/settings.service';
 import { addDaysYmd, ymdSaoPaulo, ymdToDbDate } from '../lib/dates';
 import { buildMessage } from '../services/credit/contract.service';
 import { limparCacheDoRetrato } from './credit.routes';
+import { TX_OPTS } from '../services/credit/ledger.service';
 
 /**
  * ROTAS PÚBLICAS DA ASSINATURA — sem login.
@@ -186,20 +187,24 @@ export async function signatureRoutes(app: FastifyInstance) {
     const totalEmAberto = parcelas.reduce((soma, p) => soma.plus(p.amountDue), new Prisma.Decimal(0));
     const liquido = Number(c.netToBorrower) > 0 ? Number(c.netToBorrower) : Number(c.principal);
 
-    await prisma.$transaction(async (tx) => {
-      await tx.contractSignature.update({
-        where: { token },
+    const assinou = await prisma.$transaction(async (tx) => {
+      // Só UMA requisição consegue gravar o aceite. Clique duplo ou reenvio do
+      // navegador caía aqui duas vezes e lançava a saída do caixa em dobro.
+      const reservou = await tx.contractSignature.updateMany({
+        where: { token, acceptedAt: null },
         data: {
           acceptedAt: now, signerName: c.borrower.name, signerDocument: body.signerDocument,
           signerIp: req.ip, signerUserAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
           signerPixKey: body.pixKey, signerPixKeyType: body.pixKeyType, typedSignature: body.typedSignature,
         },
       });
+      if (reservou.count !== 1) return false;
+      const virou = await tx.creditContract.updateMany({ where: { id: c.id, status: 'AWAITING_SIGNATURE' }, data: { status: 'SIGNED' } });
+      if (virou.count !== 1) throw new Error('contrato mudou de situação durante a assinatura');
 
       if (deslocamento !== 0) {
-        for (const [idx, p] of parcelas.entries()) {
-          await tx.creditInstallment.update({ where: { id: p.id }, data: { dueDate: ymdToDbDate(novasDatas[idx]!) } });
-        }
+        // Uma única instrução no banco (antes eram até 120 idas e voltas, que estouravam o tempo da transação).
+        await tx.$executeRaw`UPDATE "CreditInstallment" SET "dueDate" = "dueDate" + ${deslocamento}::int WHERE "contractId" = ${c.id}::uuid`;
       }
 
       // Assinou, valeu: o contrato entra em vigor na hora, sem depender de
@@ -249,8 +254,12 @@ export async function signatureRoutes(app: FastifyInstance) {
           } as Prisma.InputJsonValue,
         },
       });
-    });
+      return true;
+    }, TX_OPTS);
 
+    if (!assinou) {
+      return reply.code(410).send({ error: 'already_signed', message: ERROS.already_signed });
+    }
     limparCacheDoRetrato();
 
     return {
