@@ -133,10 +133,13 @@ async function main() {
   check('link público: cliente recorrente, sem documento obrigatório', pub.body.returningClient === true && pub.body.documentsRequired === false && pub.body.documentsSent.DOC_FRONT && pub.body.documentsSent.DOC_SELFIE && pub.body.documentsSent.ADDRESS_PROOF, JSON.stringify(pub.body).slice(0, 300));
   check('link mostra a chave Pix anterior mascarada (nunca inteira)', pub.body.previousPixKey?.mascarada?.includes('***') && !JSON.stringify(pub.body.previousPixKey).includes('maria@pix'));
   const docsAntes = await prisma.borrowerDocument.count({ where: { borrowerId: c0.borrowerId } });
-  const errNome = await j('POST', `/p/contrato/${tokenNovo}/aceite`, { ...aceite, typedSignature: 'Outra Pessoa Qualquer' });
-  check('o aceite continua exigindo o nome completo e o CPF/CNPJ do cadastro', errNome.code === 422 && errNome.body.error === 'name_mismatch');
-  const ok2 = await j('POST', `/p/contrato/${tokenNovo}/aceite`, aceite);
-  check('aceite do novo contrato SEM enviar nenhuma foto', ok2.code === 200, JSON.stringify(ok2.body));
+  check('link do cliente recorrente indica assinatura de um clique', pub.body.quickSign === true);
+  const semConfirmar = await j('POST', `/p/contrato/${tokenNovo}/aceite`, {});
+  check('sem tocar em Assinar (agreed) não assina', semConfirmar.code === 400);
+  const ok2 = await j('POST', `/p/contrato/${tokenNovo}/aceite`, { agreed: true });
+  check('aceite do novo contrato com UM clique: sem foto, sem nome, sem CPF, sem Pix', ok2.code === 200, JSON.stringify(ok2.body));
+  const sigNova = await prisma.contractSignature.findUniqueOrThrow({ where: { contractId: novo.body.id } });
+  check('assinatura guarda nome e documento do cadastro, a chave Pix anterior, IP e data', sigNova.signerName === 'Maria da Silva Comercio' && sigNova.signerDocument === '12345678000190' && sigNova.signerPixKey === 'maria@pix' && sigNova.acceptedAt !== null && sigNova.signerIp !== null);
   const novoC = await prisma.creditContract.findUniqueOrThrow({ where: { id: novo.body.id } });
   check('novo contrato entrou em vigor e as fotos antigas não foram duplicadas', novoC.status === 'ACTIVE' && (await prisma.borrowerDocument.count({ where: { borrowerId: c0.borrowerId } })) === docsAntes);
   const detNovo = await j('GET', `/api/credito/contratos/${novo.body.id}`);
@@ -157,6 +160,8 @@ async function main() {
   const tok3 = new URL(ct3.body.link).searchParams.get('t')!;
   const pub3 = await j('GET', `/p/contrato/${tok3}`);
   check('link do cliente novo exige os 3 documentos', pub3.body.returningClient === false && pub3.body.documentsRequired === true && pub3.body.missingDocuments.length === 3);
+  const soBotao = await j('POST', `/p/contrato/${tok3}/aceite`, { agreed: true });
+  check('cliente novo NÃO assina só com o botão (precisa preencher e enviar documentos)', [400, 422].includes(soBotao.code) && pub3.body.quickSign === false && (await prisma.contractSignature.findFirstOrThrow({ where: { token: tok3 } })).acceptedAt === null);
   const sem = await j('POST', `/p/contrato/${tok3}/aceite`, { typedSignature: 'Joao Pereira Comercio', signerDocument: '98765432000155', pixKey: 'j@pix', pixKeyType: 'EMAIL', agreed: true });
   check('cliente novo não consegue assinar sem os documentos (422)', sem.code === 422 && sem.body.error === 'missing_docs' && sem.body.missing.length === 3);
 
