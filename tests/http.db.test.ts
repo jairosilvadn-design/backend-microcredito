@@ -118,6 +118,48 @@ async function main() {
   const apos3 = await prisma.creditContract.findUniqueOrThrow({ where: { id: c0.id } });
   check('pagou todo o atraso: o contrato volta a ACTIVE e o cliente a ATIVO', pay3.code === 200 && apos3.status === 'ACTIVE' && (await prisma.borrower.findUniqueOrThrow({ where: { id: c0.borrowerId } })).status === 'ATIVO');
 
+  // ---- Cliente recorrente: quitou, pega novo contrato e o link é só um termo de aceite ----
+  const det2 = await j('GET', `/api/credito/contratos/${ct.body.id}`);
+  const abertaId = det2.body.installments.find((i: any) => i.status !== 'PAID').id;
+  const quitar = await j('POST', `/api/credito/parcelas/${abertaId}/baixa`, { amount: Number(det2.body.aReceberHoje) });
+  check('quitou o primeiro contrato de uma vez (transborda pelas parcelas)', quitar.code === 200 && quitar.body.finished === true, JSON.stringify(quitar.body).slice(0, 200));
+
+  const novo = await j('POST', '/api/credito/contratos', { borrowerId: cli.body.id, principal: 400, installments: 20, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1), ratePercent: 18 });
+  check('novo contrato do cliente que já quitou', novo.code === 201, JSON.stringify(novo.body));
+  check('o sistema avisa que é cliente recorrente e não pendura documento', novo.body.clienteRecorrente === true && novo.body.documentosPendentes.length === 0);
+  check('a mensagem do WhatsApp diz que não precisa enviar documentos', /não precisa enviar documentos/.test(novo.body.message), novo.body.message);
+  const tokenNovo = new URL(novo.body.link).searchParams.get('t')!;
+  const pub = await j('GET', `/p/contrato/${tokenNovo}`);
+  check('link público: cliente recorrente, sem documento obrigatório', pub.body.returningClient === true && pub.body.documentsRequired === false && pub.body.documentsSent.DOC_FRONT && pub.body.documentsSent.DOC_SELFIE && pub.body.documentsSent.ADDRESS_PROOF, JSON.stringify(pub.body).slice(0, 300));
+  check('link mostra a chave Pix anterior mascarada (nunca inteira)', pub.body.previousPixKey?.mascarada?.includes('***') && !JSON.stringify(pub.body.previousPixKey).includes('maria@pix'));
+  const docsAntes = await prisma.borrowerDocument.count({ where: { borrowerId: c0.borrowerId } });
+  const errNome = await j('POST', `/p/contrato/${tokenNovo}/aceite`, { ...aceite, typedSignature: 'Outra Pessoa Qualquer' });
+  check('o aceite continua exigindo o nome completo e o CPF/CNPJ do cadastro', errNome.code === 422 && errNome.body.error === 'name_mismatch');
+  const ok2 = await j('POST', `/p/contrato/${tokenNovo}/aceite`, aceite);
+  check('aceite do novo contrato SEM enviar nenhuma foto', ok2.code === 200, JSON.stringify(ok2.body));
+  const novoC = await prisma.creditContract.findUniqueOrThrow({ where: { id: novo.body.id } });
+  check('novo contrato entrou em vigor e as fotos antigas não foram duplicadas', novoC.status === 'ACTIVE' && (await prisma.borrowerDocument.count({ where: { borrowerId: c0.borrowerId } })) === docsAntes);
+  const detNovo = await j('GET', `/api/credito/contratos/${novo.body.id}`);
+  check('operador vê os 3 documentos reaproveitados no novo contrato', detNovo.body.documentosReaproveitados === true && detNovo.body.documentosEfetivos.length === 3);
+
+  // ---- Outra cópia da função registra uma baixa: esta cópia não pode mostrar valor velho ----
+  const antes = await j('GET', '/api/credito/painel');
+  const { registrarBaixa } = await import('../src/services/credit/ledger.service');
+  const abertaNovo = (await prisma.creditInstallment.findFirstOrThrow({ where: { contractId: novo.body.id, status: { not: 'PAID' } }, orderBy: { sequence: 'asc' } }));
+  await registrarBaixa(prisma, { parcelaId: abertaNovo.id, method: 'PIX', operatorId: op.id }); // não passa pelo limparCache da rota
+  const depois = await j('GET', '/api/credito/painel');
+  check(`painel não fica com valor velho após baixa feita por outra cópia (${antes.body.outstanding} -> ${depois.body.outstanding})`, Number(depois.body.outstanding) < Number(antes.body.outstanding));
+
+  // ---- Cliente que nunca contratou continua enviando os 3 documentos ----
+  const cli2 = await j('POST', '/api/credito/clientes', { personType: 'PJ', document: '98765432000155', name: 'Joao Pereira Comercio', whatsapp: '17988887777', addressCity: 'Rio Preto', addressState: 'SP', segment: 'mercearia', consent: true });
+  const ct3 = await j('POST', '/api/credito/contratos', { borrowerId: cli2.body.id, principal: 200, installments: 20, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1), ratePercent: 20 });
+  check('cliente novo: contrato gerado e marcado como não recorrente', ct3.code === 201 && ct3.body.clienteRecorrente === false && ct3.body.documentosPendentes.length === 3, JSON.stringify(ct3.body).slice(0, 200));
+  const tok3 = new URL(ct3.body.link).searchParams.get('t')!;
+  const pub3 = await j('GET', `/p/contrato/${tok3}`);
+  check('link do cliente novo exige os 3 documentos', pub3.body.returningClient === false && pub3.body.documentsRequired === true && pub3.body.missingDocuments.length === 3);
+  const sem = await j('POST', `/p/contrato/${tok3}/aceite`, { typedSignature: 'Joao Pereira Comercio', signerDocument: '98765432000155', pixKey: 'j@pix', pixKeyType: 'EMAIL', agreed: true });
+  check('cliente novo não consegue assinar sem os documentos (422)', sem.code === 422 && sem.body.error === 'missing_docs' && sem.body.missing.length === 3);
+
   const conf = await j('POST', '/api/credito/conferir');
   check(`conferência geral sem divergências (${conf.body.divergencias?.length})`, conf.code === 200 && conf.body.tudoCerto === true, JSON.stringify(conf.body));
 

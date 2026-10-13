@@ -18,6 +18,13 @@ declare module 'fastify' {
   }
 }
 
+/**
+ * Quem é o operador: guardado por 60 s por instância. Antes, TODO clique fazia uma consulta ao banco
+ * só para repetir a mesma resposta. (Remover um operador vale em até 1 minuto.)
+ */
+const operadores = new Map<string, { op: { id: string; email: string; role: string }; ate: number }>();
+const OPERADOR_CACHE_MS = 60_000;
+
 export async function requireOperator(req: FastifyRequest, reply: FastifyReply) {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return reply.code(401).send({ error: 'unauthorized' });
@@ -51,10 +58,15 @@ export async function requireOperator(req: FastifyRequest, reply: FastifyReply) 
     }
 
     // Login Google não basta: o e-mail precisa estar na lista de operadores.
-    const op = await prisma.operator.findUnique({ where: { email } });
-    if (!op) return reply.code(403).send({ error: 'forbidden' });
+    let guardado = operadores.get(email);
+    if (!guardado || guardado.ate < Date.now()) {
+      const op = await prisma.operator.findUnique({ where: { email } });
+      if (!op) { operadores.delete(email); return reply.code(403).send({ error: 'forbidden' }); }
+      guardado = { op: { id: op.id, email: op.email, role: op.role }, ate: Date.now() + OPERADOR_CACHE_MS };
+      operadores.set(email, guardado);
+    }
 
-    req.operator = { id: op.id, email: op.email, role: op.role };
+    req.operator = guardado.op;
   } catch {
     return reply.code(401).send({ error: 'unauthorized' });
   }

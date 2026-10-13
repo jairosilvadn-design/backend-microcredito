@@ -68,3 +68,14 @@ Rotas novas (admin): `POST /api/credito/pagamentos/:id/estornar` e `POST /api/cr
 - `npm run test:db` — integração em **Postgres local descartável** (`DATABASE_URL`/`DIRECT_URL` apontando para localhost; o teste recusa outros hosts e apaga as tabelas de crédito).
 
 <!-- deploy: variáveis de ambiente do Netlify configuradas -->
+
+## Cliente recorrente (novo contrato sem fotos)
+Documento, selfie e comprovante de endereço só são pedidos a quem **nunca assinou** um contrato. Quem já assinou (mesmo com o contrato quitado) reaproveita os arquivos do primeiro cadastro: o link vira apenas um **termo de aceite** (continua exigindo nome completo e CPF/CNPJ). Se faltar algum arquivo no cadastro antigo, pede só o que falta.
+- `GET /p/contrato/:token` agora traz `returningClient`, `documentsRequired`, `missingDocuments` e `previousPixKey` (mascarada).
+- `POST /api/credito/contratos` e `/reenviar` devolvem `clienteRecorrente`; a mensagem do WhatsApp muda ("não precisa enviar documentos").
+- `GET /api/credito/contratos/:id` traz `documentosEfetivos` e `documentosReaproveitados`.
+
+## Velocidade
+- Respostas guardadas por até 20–30 s **e** validadas por uma consulta leve ("mudou algo?") que vale entre todas as cópias da função.
+- Operador e configurações guardados por 60 s / 30 s por cópia.
+- `keep-warm` (agendada, 07h–20h de Brasília) mantém a função e o banco acordados. Para desligar, crie `KEEP_WARM=off` no Netlify.

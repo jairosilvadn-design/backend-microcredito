@@ -14,6 +14,7 @@ import {
   MODOS, PADROES, limiteParaCliente, modoPara, projetarCaixa, recomendacoes, saudeDaCarteira, situacaoCaixa,
 } from '../services/credit/tesouraria.service';
 import { env } from '../config/env';
+import { situacaoDocumentos } from '../services/credit/borrower-docs.service';
 import {
   ErroDeNegocio, TX_OPTS, conferirCarteira, estornarPagamento, paraParcelaFato, posicaoDoContrato,
   recalcularContrato, registrarBaixa, saldoDaParcela, travarContrato,
@@ -127,15 +128,29 @@ async function saldoDoCaixa(): Promise<number> {
  * que mexa em dinheiro (baixa, liberação, aporte) limpa esse cache na hora,
  * então o número nunca aparece desatualizado para o operador.
  */
-let retratoCache: { em: number; dados: Awaited<ReturnType<typeof calcularRetrato>> } | null = null;
+let retratoCache: { em: number; imp: string; dados: Awaited<ReturnType<typeof calcularRetrato>> } | null = null;
 const CACHE_MS = 20_000;
 
-export function limparCacheDoRetrato() { retratoCache = null; abertosCache = null; resumoCache.clear(); }
+/**
+ * "Mudou alguma coisa?" — uma consulta leve que vale entre TODAS as cópias da função. O cache em memória
+ * é de cada cópia; sem esta checagem, uma cópia não saberia que outra registrou uma baixa e mostraria valor velho.
+ */
+async function impressaoDosDados(): Promise<string> {
+  const r = await prisma.$queryRaw<Array<{ k: string }>>`SELECT concat_ws('|',
+    (SELECT max("updatedAt") FROM "CreditContract"),
+    (SELECT count(*) FROM "CreditPayment"), (SELECT max("createdAt") FROM "CreditPayment"),
+    (SELECT count(*) FROM "CashEntry"), (SELECT max("createdAt") FROM "CashEntry"),
+    (SELECT count(*) FROM "CreditInstallment" WHERE status IN ('PENDING','PARTIAL','OVERDUE'))) AS k`;
+  return r[0]?.k ?? '';
+}
+
+export function limparCacheDoRetrato() { retratoCache = null; abertosCache = null; resumoCache.clear(); painelCache = null; cobrancasCache.clear(); }
 
 async function retratoDaOperacao() {
-  if (retratoCache && Date.now() - retratoCache.em < CACHE_MS) return retratoCache.dados;
+  const imp = await impressaoDosDados();
+  if (retratoCache && retratoCache.imp === imp && Date.now() - retratoCache.em < CACHE_MS) return retratoCache.dados;
   const dados = await calcularRetrato();
-  retratoCache = { em: Date.now(), dados };
+  retratoCache = { em: Date.now(), imp, dados };
   return dados;
 }
 
@@ -221,16 +236,30 @@ async function calcularRetrato() {
   return { caixa, saude, projecao, tarefas, principalNaRua, carteiraTotal, clientesAtivos, parcelasAtrasadas, modo, padroes, detalhe7, limite7 };
 }
 
+function lerParcelasDeCobranca(today: string) {
+  return prisma.creditInstallment.findMany({
+    where: { status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] }, dueDate: { lte: ymdToDbDate(today) }, contract: { status: { in: ['ACTIVE', 'DEFAULTED'] } } },
+    select: {
+      id: true, sequence: true, dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true, contractId: true,
+      contract: { select: { number: true, installmentsCount: true, payToPixKey: true, lateFeePercent: true, lateDailyPercent: true, borrower: { select: { id: true, name: true, tradeName: true, whatsapp: true } } } },
+    },
+    orderBy: [{ dueDate: 'asc' }],
+  });
+}
+
 /** Contratos em andamento já no formato do motor financeiro. */
 type Abertos = Awaited<ReturnType<typeof lerContratosAbertos>>;
-let abertosCache: { em: number; dados: Abertos } | null = null;
-const resumoCache = new Map<string, { em: number; dados: unknown }>();
+let abertosCache: { em: number; imp: string; dados: Abertos } | null = null;
+const resumoCache = new Map<string, { em: number; imp: string; dados: unknown }>();
+let painelCache: { em: number; imp: string; dados: unknown } | null = null;
+const cobrancasCache = new Map<string, { em: number; imp: string; calculadas: unknown }>();
 
 /** Painel, gestor e retrato usam a mesma leitura: uma ida ao banco a cada 20s, não uma por tela. */
 async function carregarContratosAbertos(): Promise<Abertos> {
-  if (abertosCache && Date.now() - abertosCache.em < CACHE_MS) return abertosCache.dados;
+  const imp = await impressaoDosDados();
+  if (abertosCache && abertosCache.imp === imp && Date.now() - abertosCache.em < CACHE_MS) return abertosCache.dados;
   const dados = await lerContratosAbertos();
-  abertosCache = { em: Date.now(), dados };
+  abertosCache = { em: Date.now(), imp, dados };
   return dados;
 }
 
@@ -679,12 +708,15 @@ export async function creditRoutes(app: FastifyInstance) {
     if (!contract) throw new ErroDeNegocio('numero_ocupado', 'Não consegui reservar o número do contrato. Tente de novo.', 503);
 
     const link = `${env.APP_PUBLIC_URL}/assinatura.html?t=${token}`;
-    const message = buildMessage('PROPOSTA', { firstName: b.name.split(' ')[0] ?? b.name, contractNumber: number, link });
+    const docs = await situacaoDocumentos(b.id, contract.id);
+    const message = buildMessage('PROPOSTA', { firstName: b.name.split(' ')[0] ?? b.name, contractNumber: number, link, returning: docs.recorrente && docs.faltando.length === 0 });
     await audit(req, 'credit.contract.create', 'CreditContract', contract.id, { number, principal: q.principal, installments: q.installments });
 
     return reply.code(201).send({
       id: contract.id, number, link, whatsappLink: waLink(b.whatsapp, message), message,
       hash: shortHash(contract.contractHash), quote: q, avisos,
+      // Cliente que já assinou antes: o link é só um termo de aceite, sem pedir fotos de novo.
+      clienteRecorrente: docs.recorrente, documentosPendentes: docs.faltando,
     });
   });
 
@@ -721,6 +753,16 @@ export async function creditRoutes(app: FastifyInstance) {
     });
     if (!c) return reply.code(404).send({ error: 'not_found', message: 'Contrato não encontrado' });
 
+    // Documentos que valem para este contrato: os dele e, se o cliente já assinou antes, os do primeiro cadastro.
+    const docsCliente = await prisma.borrowerDocument.findMany({
+      where: { borrowerId: c.borrowerId },
+      select: { id: true, kind: true, mimeType: true, sizeBytes: true, createdAt: true, contractId: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    const situacaoDocs = await situacaoDocumentos(c.borrowerId, c.id);
+    const efetivos = new Map<string, (typeof docsCliente)[number]>();
+    for (const d of docsCliente) if ((situacaoDocs.recorrente || d.contractId === c.id) && !efetivos.has(d.kind)) efetivos.set(d.kind, d);
+
     return {
       id: c.id, number: c.number, status: c.status, contractText: c.contractText,
       hash: shortHash(c.contractHash), fullHash: c.contractHash,
@@ -744,6 +786,8 @@ export async function creditRoutes(app: FastifyInstance) {
         link: c.signature.acceptedAt ? null : `${env.APP_PUBLIC_URL}/assinatura.html?t=${c.signature.token}`,
       } : null,
       documents: c.documents,
+      documentosEfetivos: [...efetivos.values()].map(({ contractId: _c, ...d }) => d),
+      documentosReaproveitados: situacaoDocs.recorrente,
       // Saldo "hoje": o mesmo número que a cobrança mostra e que a baixa quita.
       aReceberHoje: c.installments.reduce((t, i) => t.plus(saldoDaParcela(paraParcelaFato(i), ymdSaoPaulo(), c).falta), D(0)).toFixed(2),
       totalPago: c.installments.reduce((t, i) => t.plus(i.amountPaid), D(0)).toFixed(2),
@@ -773,9 +817,10 @@ export async function creditRoutes(app: FastifyInstance) {
       data: { token, expiresAt: new Date(Date.now() + settings.signatureTtlHours * 3600_000), openedAt: null },
     });
     const link = `${env.APP_PUBLIC_URL}/assinatura.html?t=${token}`;
-    const message = buildMessage('PROPOSTA', { firstName: c.borrower.name.split(' ')[0] ?? c.borrower.name, contractNumber: c.number, link });
+    const docs = await situacaoDocumentos(c.borrowerId, c.id);
+    const message = buildMessage('PROPOSTA', { firstName: c.borrower.name.split(' ')[0] ?? c.borrower.name, contractNumber: c.number, link, returning: docs.recorrente && docs.faltando.length === 0 });
     await audit(req, 'credit.contract.resend', 'CreditContract', id, {});
-    return { link, whatsappLink: waLink(c.borrower.whatsapp, message), message };
+    return { link, whatsappLink: waLink(c.borrower.whatsapp, message), message, clienteRecorrente: docs.recorrente };
   });
 
   /** Liberação do dinheiro: cria as parcelas e coloca o contrato para correr. */
@@ -931,20 +976,21 @@ export async function creditRoutes(app: FastifyInstance) {
     const today = date ?? ymdSaoPaulo();
     const settings = await getSettings();
 
-    const installments = await prisma.creditInstallment.findMany({
-      where: { status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] }, dueDate: { lte: ymdToDbDate(today) }, contract: { status: { in: ['ACTIVE', 'DEFAULTED'] } } },
-      select: {
-        id: true, sequence: true, dueDate: true, amountDue: true, amountPaid: true, lateCharge: true, status: true, contractId: true,
-        contract: { select: { number: true, installmentsCount: true, payToPixKey: true, lateFeePercent: true, lateDailyPercent: true, borrower: { select: { id: true, name: true, tradeName: true, whatsapp: true } } } },
-      },
-      orderBy: [{ dueDate: 'asc' }],
-    });
-
-    // Conta leve para TODAS (totais corretos); mensagem e link do WhatsApp só para a página pedida.
-    const calculadas = installments.map((i) => {
-      const saldo = saldoDaParcela(paraParcelaFato(i), today, i.contract);
-      return { i, saldo };
-    }).filter((x) => x.saldo.falta.greaterThan(0));
+    // Mesma lista para as páginas seguintes e para quem abre a tela de novo logo em seguida (20 s).
+    type Calculada = { i: Awaited<ReturnType<typeof lerParcelasDeCobranca>>[number]; saldo: ReturnType<typeof saldoDaParcela> };
+    let calculadas: Calculada[];
+    const imp = await impressaoDosDados();
+    const guardada = cobrancasCache.get(today);
+    if (guardada && guardada.imp === imp && Date.now() - guardada.em < CACHE_MS) {
+      calculadas = guardada.calculadas as Calculada[];
+    } else {
+      const installments = await lerParcelasDeCobranca(today);
+      // Conta leve para TODAS (totais corretos); mensagem e link do WhatsApp só para a página pedida.
+      calculadas = installments.map((i) => ({ i, saldo: saldoDaParcela(paraParcelaFato(i), today, i.contract) }))
+        .filter((x) => x.saldo.falta.greaterThan(0));
+      if (cobrancasCache.size > 8) cobrancasCache.clear(); // datas avulsas não podem acumular memória
+      cobrancasCache.set(today, { em: Date.now(), imp, calculadas });
+    }
 
     const hojeRows = calculadas.filter((x) => x.saldo.diasAtraso === 0);
     const atrasRows = calculadas.filter((x) => x.saldo.diasAtraso > 0);
@@ -976,6 +1022,8 @@ export async function creditRoutes(app: FastifyInstance) {
 
   // ------------------------------------------------------------ painel
   app.get('/api/credito/painel', async () => {
+    const imp = await impressaoDosDados();
+    if (painelCache && painelCache.imp === imp && Date.now() - painelCache.em < CACHE_MS) return painelCache.dados as never;
     const hoje = ymdSaoPaulo();
     const [borrowers, active, awaiting, paidToday, abertos] = await Promise.all([
       prisma.borrower.count(),
@@ -997,13 +1045,15 @@ export async function creditRoutes(app: FastifyInstance) {
       }
     }
     const r2 = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
-    return {
+    const resposta = {
       borrowers, activeContracts: active, awaitingSignature: awaiting, overdueInstallments,
       dueToday: r2(dueToday),
       receivedToday: money2(paidToday._sum.amount) ?? '0.00',
       outstanding: r2(outstanding),
       principalOut: r2(principalOut),
     };
+    painelCache = { em: Date.now(), imp, dados: resposta };
+    return resposta;
   });
 
   /**
@@ -1021,8 +1071,9 @@ export async function creditRoutes(app: FastifyInstance) {
     const to = q.to ?? ymdSaoPaulo();
     const from = q.from ?? addDaysYmd(to, -29);
     const cacheKey = `${from}|${to}`;
+    const imp = await impressaoDosDados();
     const guardado = resumoCache.get(cacheKey);
-    if (guardado && Date.now() - guardado.em < 30_000) return guardado.dados as never;
+    if (guardado && guardado.imp === imp && Date.now() - guardado.em < 30_000) return guardado.dados as never;
     const ini = new Date(`${from}T00:00:00.000-03:00`);
     const fim = new Date(`${to}T23:59:59.999-03:00`);
 
@@ -1130,7 +1181,7 @@ export async function creditRoutes(app: FastifyInstance) {
       meses,
       atrasados: atrasados.sort((a, b) => Number(b.dias) - Number(a.dias)).slice(0, 10),
     };
-    resumoCache.set(cacheKey, { em: Date.now(), dados: resultadoResumo });
+    resumoCache.set(cacheKey, { em: Date.now(), imp, dados: resultadoResumo });
     return resultadoResumo;
   });
 

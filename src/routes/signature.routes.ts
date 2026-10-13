@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { dbDateToYmd } from '../lib/dates';
 import { getSegment } from '../services/credit/segments';
 import { shortHash } from '../services/credit/contract.service';
+import { REQUIRED_DOCS, situacaoDocumentos } from '../services/credit/borrower-docs.service';
 import { getSettings } from '../services/credit/settings.service';
 import { addDaysYmd, ymdSaoPaulo, ymdToDbDate } from '../lib/dates';
 import { buildMessage } from '../services/credit/contract.service';
@@ -23,7 +24,6 @@ import { TX_OPTS } from '../services/credit/ledger.service';
 
 const MAX_FILE = 6 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf']);
-const REQUIRED_DOCS = ['DOC_FRONT', 'DOC_SELFIE', 'ADDRESS_PROOF'] as const;
 
 const money = (d: Prisma.Decimal) => Number(d).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const onlyDigits = (s: string) => s.replace(/\D/g, '');
@@ -77,8 +77,13 @@ export async function signatureRoutes(app: FastifyInstance) {
     const settings = await getSettings();
     if (!r.sig.openedAt) await prisma.contractSignature.update({ where: { token }, data: { openedAt: new Date() } });
 
-    const enviados = new Set(c.documents.map((d) => d.kind));
+    // Cliente que já assinou antes não reenvia fotos: o link vira só um termo de aceite.
+    const docs = await situacaoDocumentos(c.borrowerId, c.id);
     return {
+      returningClient: docs.recorrente,
+      documentsRequired: docs.faltando.length > 0,
+      missingDocuments: docs.faltando,
+      previousPixKey: docs.pixAnterior,
       contractNumber: c.number,
       company: settings.companyName,
       borrowerName: c.borrower.name,
@@ -102,9 +107,9 @@ export async function signatureRoutes(app: FastifyInstance) {
       hash: shortHash(c.contractHash),
       expiresAt: r.sig.expiresAt,
       documentsSent: {
-        DOC_FRONT: enviados.has('DOC_FRONT'),
-        DOC_SELFIE: enviados.has('DOC_SELFIE'),
-        ADDRESS_PROOF: enviados.has('ADDRESS_PROOF'),
+        DOC_FRONT: docs.enviados.has('DOC_FRONT'),
+        DOC_SELFIE: docs.enviados.has('DOC_SELFIE'),
+        ADDRESS_PROOF: docs.enviados.has('ADDRESS_PROOF'),
       },
     };
   });
@@ -138,9 +143,8 @@ export async function signatureRoutes(app: FastifyInstance) {
       }),
     ]);
 
-    const enviados = await prisma.borrowerDocument.findMany({ where: { contractId: c.id }, select: { kind: true } });
-    const set = new Set(enviados.map((d) => d.kind));
-    return { ok: true, documentsSent: { DOC_FRONT: set.has('DOC_FRONT'), DOC_SELFIE: set.has('DOC_SELFIE'), ADDRESS_PROOF: set.has('ADDRESS_PROOF') } };
+    const docs = await situacaoDocumentos(c.borrowerId, c.id);
+    return { ok: true, documentsSent: { DOC_FRONT: docs.enviados.has('DOC_FRONT'), DOC_SELFIE: docs.enviados.has('DOC_SELFIE'), ADDRESS_PROOF: docs.enviados.has('ADDRESS_PROOF') } };
   });
 
   /** Aceite: registra assinatura, IP, dispositivo e a chave Pix de recebimento. */
@@ -158,10 +162,14 @@ export async function signatureRoutes(app: FastifyInstance) {
     if (!r.ok) return reply.code(410).send({ error: r.error, message: ERROS[r.error] });
     const c = r.sig.contract;
 
-    const enviados = new Set(c.documents.map((d) => d.kind));
-    const faltando = REQUIRED_DOCS.filter((k) => !enviados.has(k));
-    if (faltando.length) {
-      return reply.code(422).send({ error: 'missing_docs', message: 'Envie os três documentos antes de assinar.', missing: faltando });
+    // Quem já assinou antes usa os arquivos do primeiro cadastro; só quem nunca contratou envia os três.
+    const docs = await situacaoDocumentos(c.borrowerId, c.id);
+    if (docs.faltando.length) {
+      return reply.code(422).send({
+        error: 'missing_docs',
+        message: docs.recorrente ? 'Falta enviar apenas o documento indicado antes de assinar.' : 'Envie os três documentos antes de assinar.',
+        missing: docs.faltando,
+      });
     }
 
     if (!sameName(body.typedSignature, c.borrower.name)) {
@@ -250,6 +258,7 @@ export async function signatureRoutes(app: FastifyInstance) {
           after: {
             contractHash: c.contractHash, signerDocument: body.signerDocument, pixKeyType: body.pixKeyType,
             diasAdiados: deslocamento, primeiroVencimento: novasDatas[0] ?? null,
+            clienteRecorrente: docs.recorrente, documentosReaproveitados: docs.recorrente,
             userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
           } as Prisma.InputJsonValue,
         },
