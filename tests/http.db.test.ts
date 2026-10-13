@@ -165,6 +165,17 @@ async function main() {
   const sem = await j('POST', `/p/contrato/${tok3}/aceite`, { typedSignature: 'Joao Pereira Comercio', signerDocument: '98765432000155', pixKey: 'j@pix', pixKeyType: 'EMAIL', agreed: true });
   check('cliente novo não consegue assinar sem os documentos (422)', sem.code === 422 && sem.body.error === 'missing_docs' && sem.body.missing.length === 3);
 
+  // ---- Cancelar contrato: o painel manda o motivo vazio e isso travava ----
+  const cancelVazio = await j('POST', `/api/credito/contratos/${ct3.body.id}/cancelar`, { reason: '' });
+  check('cancelar com motivo vazio funciona (antes: "String must contain at least 3 characters")', cancelVazio.code === 200, JSON.stringify(cancelVazio.body));
+  check('contrato cancelado e cliente volta a LEAD', (await prisma.creditContract.findUniqueOrThrow({ where: { id: ct3.body.id } })).status === 'CANCELLED' && (await prisma.borrower.findUniqueOrThrow({ where: { id: cli2.body.id } })).status === 'LEAD');
+  const ct4 = await j('POST', '/api/credito/contratos', { borrowerId: cli2.body.id, principal: 200, installments: 10, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1), ratePercent: 20 });
+  check('depois de cancelar, o cliente pode receber um novo contrato', ct4.code === 201, JSON.stringify(ct4.body));
+  const cancelSemCorpo = await j('POST', `/api/credito/contratos/${ct4.body.id}/cancelar`);
+  check('cancelar sem corpo nenhum também funciona', cancelSemCorpo.code === 200, JSON.stringify(cancelSemCorpo.body));
+  const comPagto = await j('POST', `/api/credito/contratos/${novo.body.id}/cancelar`, { reason: 'teste' });
+  check('contrato que já recebeu pagamento não cancela, com explicação em português', comPagto.code === 409 && /já recebeu/.test(comPagto.body.message), JSON.stringify(comPagto.body));
+
   const conf = await j('POST', '/api/credito/conferir');
   check(`conferência geral sem divergências (${conf.body.divergencias?.length})`, conf.code === 200 && conf.body.tudoCerto === true, JSON.stringify(conf.body));
 
