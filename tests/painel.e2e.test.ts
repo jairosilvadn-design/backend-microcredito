@@ -209,6 +209,18 @@ async function main() {
   check('sair apaga os dados guardados e volta ao login', await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('mc:')).length === 0));
   check('nenhum erro de JavaScript/CSP no console', erros.length === 0, erros.join(' | '));
 
+  // 13) computador: menu azul à esquerda, como no painel antigo
+  const ctxPc = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await ctxPc.route('https://www.gstatic.com/firebasejs/**', (r) => r.fulfill({ contentType: 'text/javascript', body: r.request().url().includes('app-compat') ? falso : '' }));
+  await ctxPc.addInitScript(() => localStorage.setItem('fakeLogin', '1'));
+  const pc = await ctxPc.newPage();
+  await pc.goto(base + '/#/contratos'); await pc.waitForSelector('#lista .item');
+  const largura = await pc.evaluate(() => document.getElementById('nav')!.getBoundingClientRect().width);
+  check(`no computador o menu fica à esquerda (${Math.round(largura)} px) e a lista ao lado`, largura > 200 && largura < 300);
+  await pc.screenshot({ path: `${SHOTS}/painel-12-computador.png` });
+  await pc.goto(base + '/#/'); await pc.waitForSelector('text=Visão geral'); await pc.screenshot({ path: `${SHOTS}/painel-13-computador-inicio.png` });
+  await ctxPc.close();
+
   await browser.close(); front.close(); await api.close();
   console.log(`\n${pass} passaram, ${fail} falharam`);
   await prisma.$disconnect();
