@@ -1,1 +1,98 @@
-<!doctype html><meta charset="utf-8"><title>API Microcrédito</title><p>API no ar. <a href="/health">/health</a>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0a7d4f">
+<link rel="icon" href="data:,">
+<title>Painel de Crédito</title>
+<style>
+  :root {
+    --bg:#f3f5f7; --card:#fff; --text:#16202b; --muted:#5b6776; --line:#e3e7ec; --brand:#0a7d4f; --brand-t:#fff;
+    --warn:#9a5b00; --warn-bg:#fff4e0; --err:#b3261e; --err-bg:#fdecea; --ok:#0a7d4f; --ok-bg:#e7f6ee; --info:#1b5fb4; --info-bg:#e8f0fb; --shadow:0 1px 2px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0e1318; --card:#18202a; --text:#e8edf2; --muted:#93a0ae; --line:#2a3441; --brand:#2fb67a; --brand-t:#06210f;
+      --warn:#ffcf7a; --warn-bg:#3a2b0f; --err:#ff8a80; --err-bg:#3b1714; --ok:#5ad6a0; --ok-bg:#12301f; --info:#8ab8ff; --info-bg:#14243d; --shadow:none; }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  #topo { position:sticky; top:0; z-index:5; background:var(--brand); color:var(--brand-t); padding:calc(10px + env(safe-area-inset-top)) 14px 10px; display:flex; align-items:center; gap:10px; }
+  #topo h1 { font-size:1.05rem; margin:0; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #topo button { background:rgba(255,255,255,.18); color:inherit; border:0; border-radius:10px; padding:8px 10px; font:inherit; font-size:.9rem; }
+  main { max-width:760px; margin:0 auto; padding:14px 14px calc(86px + env(safe-area-inset-bottom)); }
+  #nav { position:fixed; left:0; right:0; bottom:0; background:var(--card); border-top:1px solid var(--line); display:flex; padding-bottom:env(safe-area-inset-bottom); z-index:6; }
+  #nav a { flex:1; text-align:center; padding:9px 2px 8px; color:var(--muted); text-decoration:none; font-size:.72rem; }
+  #nav a b { display:block; font-size:1.25rem; line-height:1.1; }
+  #nav a.on { color:var(--brand); font-weight:700; }
+  a { color:var(--brand); }
+  h2 { font-size:1.15rem; margin:4px 0 12px; }
+  h3 { font-size:.95rem; margin:0 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; box-shadow:var(--shadow); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px; }
+  .kpi small { color:var(--muted); display:block; font-size:.78rem; }
+  .kpi b { font-size:1.2rem; display:block; margin-top:2px; }
+  .kpi.destaque { background:var(--brand); color:var(--brand-t); border-color:transparent; grid-column:1 / -1; }
+  .kpi.destaque small { color:inherit; opacity:.85; }
+  .muted { color:var(--muted); } .small { font-size:.85rem; } .right { text-align:right; } .center { text-align:center; }
+  .row { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .item { padding:12px 0; border-top:1px solid var(--line); } .item:first-child { border-top:0; padding-top:0; } .item:last-child { padding-bottom:0; }
+  .item.link { cursor:pointer; }
+  .chip { display:inline-block; font-size:.75rem; font-weight:600; padding:2px 8px; border-radius:99px; background:var(--info-bg); color:var(--info); white-space:nowrap; }
+  .chip.ok { background:var(--ok-bg); color:var(--ok); } .chip.warn { background:var(--warn-bg); color:var(--warn); } .chip.err { background:var(--err-bg); color:var(--err); } .chip.gray { background:var(--line); color:var(--muted); }
+  .btn { appearance:none; border:0; border-radius:12px; padding:12px 16px; font:inherit; font-weight:700; background:var(--brand); color:var(--brand-t); cursor:pointer; text-decoration:none; display:inline-block; text-align:center; }
+  .btn.sec { background:transparent; color:var(--text); border:1px solid var(--line); font-weight:600; }
+  .btn.red { background:var(--err-bg); color:var(--err); }
+  .btn.sm { padding:8px 12px; font-size:.9rem; border-radius:10px; }
+  .btn.full { width:100%; } .btn[disabled] { opacity:.5; }
+  .acoes { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  label { display:block; font-weight:600; font-size:.9rem; margin:12px 0 4px; }
+  input, select, textarea { width:100%; font:inherit; padding:11px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+  input[type=checkbox] { width:20px; height:20px; padding:0; }
+  .check { display:flex; gap:10px; align-items:center; font-weight:400; }
+  .duas { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .msg { padding:12px; border-radius:10px; margin:10px 0; font-size:.92rem; } .msg.err { background:var(--err-bg); color:var(--err); } .msg.warn { background:var(--warn-bg); color:var(--warn); } .msg.ok { background:var(--ok-bg); color:var(--ok); } .msg.info { background:var(--info-bg); color:var(--info); }
+  #modal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-end; justify-content:center; z-index:20; }
+  #modal.on { display:flex; }
+  #modal > div { background:var(--card); width:100%; max-width:560px; border-radius:18px 18px 0 0; padding:16px 16px calc(16px + env(safe-area-inset-bottom)); max-height:90vh; overflow:auto; }
+  #toast { position:fixed; left:12px; right:12px; bottom:calc(76px + env(safe-area-inset-bottom)); z-index:30; display:none; padding:12px 14px; border-radius:12px; background:#16202b; color:#fff; box-shadow:0 4px 14px rgba(0,0,0,.3); }
+  #toast.on { display:block; } #toast.err { background:#b3261e; }
+  .login { min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:24px; max-width:420px; margin:0 auto; text-align:center; }
+  .skel { height:64px; border-radius:14px; background:linear-gradient(90deg,var(--line),var(--card),var(--line)); background-size:200% 100%; animation:brilho 1.2s linear infinite; margin-bottom:12px; }
+  @keyframes brilho { to { background-position:-200% 0; } }
+  .hide { display:none !important; }
+  pre.msgwa { white-space:pre-wrap; font:inherit; font-size:.88rem; background:var(--bg); border-radius:10px; padding:10px; margin:8px 0; }
+  dl.kv { margin:0; display:grid; grid-template-columns:auto 1fr; gap:6px 12px; } dl.kv dt { color:var(--muted); } dl.kv dd { margin:0; text-align:right; font-weight:600; word-break:break-word; }
+</style>
+<script src="/config.js"></script>
+</head>
+<body>
+<div id="login" class="login hide">
+  <h1 style="font-size:1.5rem;margin:0 0 6px">Painel de Crédito</h1>
+  <p class="muted" style="margin:0 0 22px">Entre com a sua conta Google autorizada.</p>
+  <button class="btn full" id="btnEntrar" type="button">Entrar com Google</button>
+  <div id="loginMsg" class="msg err hide" role="alert"></div>
+</div>
+<div id="shell" class="hide">
+  <header id="topo"><h1 id="titulo">Painel</h1><button type="button" id="btnConfig" aria-label="Configurações">⚙</button><button type="button" id="btnSair">Sair</button></header>
+  <main id="app"></main>
+  <nav id="nav" aria-label="Menu">
+    <a href="#/" data-r="inicio"><b>🏠</b>Início</a>
+    <a href="#/cobrancas" data-r="cobrancas"><b>📞</b>Cobranças</a>
+    <a href="#/clientes" data-r="clientes"><b>👥</b>Clientes</a>
+    <a href="#/contratos" data-r="contratos"><b>📄</b>Contratos</a>
+    <a href="#/caixa" data-r="caixa"><b>💰</b>Caixa</a>
+  </nav>
+</div>
+<div id="modal" role="dialog" aria-modal="true"><div id="modalCorpo"></div></div>
+<div id="toast" role="status"></div>
+<div id="carregandoInicial" class="card" style="margin:14px"><div class="skel"></div><div class="skel"></div></div>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js" defer></script>
+<script src="/painel.js" defer></script>
+</body>
+</html>
