@@ -9,6 +9,7 @@ console.log(`prepare-db: variáveis de banco encontradas: ${achou.length ? achou
 if (!url) { console.log('Sem banco configurado: pulando prepare-db (a API vai avisar no /health).'); process.exit(0); }
 const direct = e.DIRECT_URL || e.NETLIFY_DATABASE_URL_UNPOOLED || url;
 const env = { ...e, DATABASE_URL: direct, DIRECT_URL: direct };
+try { const u = new URL(direct); console.log(`prepare-db: banco em uso: ${u.hostname}:${u.port || '5432'}${u.pathname} (usuário ${u.username})`); } catch { console.log('prepare-db: endereço do banco inválido (confira DIRECT_URL: senha com símbolos precisa ser codificada)'); }
 
 execSync('npx prisma db push --skip-generate', { stdio: 'inherit', env });
 
