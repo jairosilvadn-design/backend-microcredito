@@ -175,6 +175,8 @@ export interface MessageContext {
   pixKey?: string;
   pixOwner?: string;
   link?: string;
+  /** Cliente que já contratou antes: só confirma o aceite, sem enviar documentos. */
+  returning?: boolean;
 }
 
 export function buildMessage(kind: 'PROPOSTA' | 'LEMBRETE' | 'ATRASO' | 'QUITACAO' | 'BOAS_VINDAS', c: MessageContext): string {
@@ -185,6 +187,9 @@ export function buildMessage(kind: 'PROPOSTA' | 'LEMBRETE' | 'ATRASO' | 'QUITACA
 
   switch (kind) {
     case 'PROPOSTA':
+      if (c.returning) {
+        return `Olá, ${c.firstName}! Sua nova proposta de crédito está pronta.\n\nComo você já é nosso cliente, não precisa enviar documentos de novo: é só conferir as condições e confirmar o aceite neste link:\n${c.link}\n\nO link é pessoal e vale por 3 dias. Qualquer dúvida, é só chamar por aqui.`;
+      }
       return `Olá, ${c.firstName}! Sua proposta de crédito está pronta.\n\nPara ver as condições, enviar seus documentos e assinar, acesse:\n${c.link}\n\nO link é pessoal e vale por 3 dias. Qualquer dúvida, é só chamar por aqui.`;
     case 'BOAS_VINDAS':
       return `${c.firstName}, tudo certo! Seu contrato ${c.contractNumber} foi liberado e o valor já foi enviado para a sua chave Pix.\n\nA primeira ${parcela} vence em ${venc}, no valor de ${valor}.${pix}\n\nAssim que pagar, me mande o comprovante que eu dou baixa na hora.`;

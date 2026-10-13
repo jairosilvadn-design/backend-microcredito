@@ -58,9 +58,20 @@ export const DEFAULT_SETTINGS: OperationSettings = {
 
 const KEY = 'operation';
 
+/**
+ * Quase toda tela lê as configurações; elas mudam raramente. Guardamos por 30 s por instância e
+ * limpamos na hora que alguém salva — assim cada clique deixa de custar uma ida ao banco.
+ */
+let cache: { em: number; valor: OperationSettings } | null = null;
+const CACHE_MS = 30_000;
+export const limparCacheDeConfiguracoes = () => { cache = null; };
+
 export async function getSettings(): Promise<OperationSettings> {
+  if (cache && Date.now() - cache.em < CACHE_MS) return cache.valor;
   const row = await prisma.appSetting.findUnique({ where: { key: KEY } });
-  return { ...DEFAULT_SETTINGS, ...((row?.value as Partial<OperationSettings>) ?? {}) };
+  const valor = { ...DEFAULT_SETTINGS, ...((row?.value as Partial<OperationSettings>) ?? {}) };
+  cache = { em: Date.now(), valor };
+  return valor;
 }
 
 export async function saveSettings(patch: Partial<OperationSettings>): Promise<OperationSettings> {
@@ -70,6 +81,7 @@ export async function saveSettings(patch: Partial<OperationSettings>): Promise<O
     create: { key: KEY, value: merged as object },
     update: { value: merged as object },
   });
+  limparCacheDeConfiguracoes();
   return merged;
 }
 
@@ -81,10 +93,13 @@ export const DEFAULT_LEVELS = [
   { rank: 4, name: 'Nível 4 — Preferencial', maxPrincipal: 500, ratePercent: 15, maxTerm: 30 },
 ];
 
+let niveisOk = false;
 export async function ensureLevels() {
+  if (niveisOk) return;
   const count = await prisma.creditLevel.count();
-  if (count > 0) return;
+  if (count > 0) { niveisOk = true; return; }
   await prisma.creditLevel.createMany({ data: DEFAULT_LEVELS });
+  niveisOk = true;
 }
 
 /** Regra de regime: como ESC, só PJ (MEI/ME/EPP). PF exige SCD ou parceria. */
