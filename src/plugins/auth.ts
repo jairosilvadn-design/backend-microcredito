@@ -12,6 +12,11 @@ const FIREBASE_JWKS = createRemoteJWKSet(
   new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'),
 );
 
+/** Baixa as chaves públicas do Google já na partida da função (em paralelo com a conexão ao banco). */
+export async function prepararLogin() {
+  try { await FIREBASE_JWKS({ alg: 'RS256', kid: 'prewarm' } as never, {} as never); } catch { /* esperado: só queremos que as chaves sejam baixadas e guardadas */ }
+}
+
 declare module 'fastify' {
   interface FastifyRequest {
     operator?: { id: string; email: string; role: string };

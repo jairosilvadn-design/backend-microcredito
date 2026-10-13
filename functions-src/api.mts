@@ -22,7 +22,10 @@ export default async (req: Request) => {
       ligarBanco();
       const { buildApp } = await import('../src/app');
       app = await buildApp();
-      await app.ready();
+      // Na partida a frio, conecta ao banco e baixa as chaves do login EM PARALELO, antes do primeiro clique do usuário.
+      const { prisma } = await import('../src/lib/prisma');
+      const { prepararLogin } = await import('../src/plugins/auth');
+      await Promise.all([app.ready(), prisma.$connect().catch(() => undefined), prepararLogin()]);
     } catch (err) {
       // Mostra só os NOMES das variáveis com problema (nunca valores).
       const msg = err instanceof Error ? err.message : String(err);
@@ -33,6 +36,10 @@ export default async (req: Request) => {
 
   const url = new URL(req.url);
   console.log(`${req.method} ${url.pathname}`);
+  // keep-warm: segura a resposta um instante para que várias chamadas simultâneas acordem cópias DIFERENTES da função.
+  if (url.pathname === '/health' && url.searchParams.has('hold')) {
+    await new Promise((ok) => setTimeout(ok, Math.min(Number(url.searchParams.get('hold')) || 0, 1500)));
+  }
   if (url.pathname === '/api/__diag') {
     return json(200, { ok: true, path: url.pathname, aplicacaoPronta: Boolean(app) });
   }

@@ -874,7 +874,9 @@ export async function creditRoutes(app: FastifyInstance) {
 
   app.post('/api/credito/contratos/:id/cancelar', { preHandler: requireAdmin }, async (req, reply) => {
     const { id } = z.object({ id: uuid }).parse(req.params);
-    const { reason } = z.object({ reason: z.string().trim().min(3).max(300) }).parse(req.body);
+    // O motivo é opcional: o painel às vezes manda vazio (ou com outro nome) e isso travava o cancelamento.
+    const corpo = z.object({ reason: z.string().trim().max(300).optional(), motivo: z.string().trim().max(300).optional() }).parse(req.body ?? {});
+    const reason = corpo.reason || corpo.motivo || 'Cancelado pelo operador';
 
     const c = await prisma.creditContract.findUnique({
       where: { id },
