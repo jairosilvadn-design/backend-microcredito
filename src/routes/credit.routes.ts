@@ -1023,7 +1023,7 @@ export async function creditRoutes(app: FastifyInstance) {
   });
 
   // ------------------------------------------------------------ painel
-  app.get('/api/credito/painel', async () => {
+  const montarPainel = async () => {
     const imp = await impressaoDosDados();
     if (painelCache && painelCache.imp === imp && Date.now() - painelCache.em < CACHE_MS) return painelCache.dados as never;
     const hoje = ymdSaoPaulo();
@@ -1056,7 +1056,8 @@ export async function creditRoutes(app: FastifyInstance) {
     };
     painelCache = { em: Date.now(), imp, dados: resposta };
     return resposta;
-  });
+  };
+  app.get('/api/credito/painel', montarPainel);
 
   /**
    * VISÃO FINANCEIRA DA OPERAÇÃO
@@ -1273,7 +1274,7 @@ export async function creditRoutes(app: FastifyInstance) {
 
   // ----------------------------------------------------------------- caixa
   /** Painel do gestor: caixa, saúde da carteira, projeção e o que fazer hoje. */
-  app.get('/api/credito/gestor', async () => {
+  const montarGestor = async () => {
     const r = await retratoDaOperacao();
     return {
       caixa: r.caixa,
@@ -1301,6 +1302,13 @@ export async function creditRoutes(app: FastifyInstance) {
         })(),
       },
     };
+  };
+  app.get('/api/credito/gestor', montarGestor);
+
+  /** Tela inicial do painel em UMA chamada (antes eram várias, cada uma com ida e volta até o servidor). */
+  app.get('/api/credito/inicio', async () => {
+    const [painel, gestor] = await Promise.all([montarPainel(), montarGestor()]);
+    return { painel, gestor };
   });
 
   /** Livro-caixa: extrato de tudo que entrou e saiu. */

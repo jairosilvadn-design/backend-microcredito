@@ -86,3 +86,13 @@ Servida pelo próprio Netlify em `APP_PUBLIC_URL/assinatura.html?t=<token>`; fal
 - Cliente recorrente (`quickSign: true`): só o botão **Assinar**.
 - Cabeçalhos no `netlify.toml`: sem cache, sem `Referer`, sem iframe, CSP restrito (o token está na URL).
 - Teste no navegador (Chromium, tela de celular): `npm run test:db` (inclui `tests/assinatura.e2e.test.ts`).
+
+## Painel do operador (`public/index.html` + `public/painel.js`)
+Painel novo do módulo de crédito, servido na raiz do próprio site da API (`/`), feito para celular: sem bibliotecas, esqueleto na hora,
+cada tela mostra o último resultado guardado no aparelho e atualiza por trás, e a tela inicial usa **uma** chamada (`GET /api/credito/inicio`).
+Telas: Início, Cobranças (com baixa), Clientes (cadastro), Contrato (simular, gerar link, confirmar Pix, baixa, estorno, cancelar), Caixa e Configurações (inclui "Conferir carteira").
+
+Login Google (Firebase) — variáveis no Netlify (valores públicos do app Web do Firebase):
+`FIREBASE_WEB_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_SENDER_ID` (e opcional `FIREBASE_AUTH_DOMAIN`). O build grava `public/config.js` com elas (`scripts/write-public-config.mjs`).
+No Firebase Console → Authentication → Configurações → **Domínios autorizados**, adicione o domínio do site.
+Teste no navegador (celular): `tests/painel.e2e.test.ts` (só o SDK do Google é simulado; o token é um JWT real validado pela API).

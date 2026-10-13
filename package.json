@@ -11,8 +11,8 @@
     "prisma:migrate": "prisma migrate dev",
     "gen:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
     "test": "tsx tests/audit.test.ts && tsx tests/correcoes.test.ts && tsx tests/ledger.test.ts",
-    "test:db": "tsx tests/ledger.db.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/http.db.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/assinatura.e2e.test.ts",
-    "test:e2e": "DB_TEST_URL=$DATABASE_URL tsx tests/assinatura.e2e.test.ts"
+    "test:db": "tsx tests/ledger.db.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/http.db.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/assinatura.e2e.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/painel.e2e.test.ts",
+    "test:e2e": "DB_TEST_URL=$DATABASE_URL tsx tests/assinatura.e2e.test.ts && DB_TEST_URL=$DATABASE_URL tsx tests/painel.e2e.test.ts"
   },
   "dependencies": {
     "@fastify/compress": "^8.3.1",
