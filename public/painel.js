@@ -137,6 +137,7 @@
     else if (tela === 'config') v = telaConfig;
     else v = telaInicio;
     $('titulo').textContent = (state.cfg && state.cfg.settings && state.cfg.settings.companyName) || 'Painel de Crédito';
+    for (var j = 0; j < links.length; j++) if (links[j].classList.contains('so-desktop') && links[j].getAttribute('data-r') === 'config') links[j].classList.toggle('on', tela === 'config');
     v(partes, token);
   }
 
@@ -545,7 +546,7 @@
   function aposLogin(user) {
     state.user = user;
     try { localStorage.setItem('mc:logado', '1'); } catch (e) { /* nada */ }
-    mostrarShell();
+    mostrarShell(); if (user && user.email) $('quem').textContent = user.email;
     // Pré-carrega a configuração em segundo plano (vários formulários usam).
     carregarConfig().catch(function () { /* o login pode não ser operador: a tela mostra o erro */ });
     if (!state.rotaIniciada) { state.rotaIniciada = true; rota(); }
