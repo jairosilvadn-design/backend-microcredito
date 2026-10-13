@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
+<title>Assinatura do contrato</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #16202b; --muted: #5b6776; --line: #e3e7ec;
+    --brand: #0a7d4f; --brand-text: #ffffff; --warn: #9a5b00; --warn-bg: #fff4e0; --err: #b3261e; --err-bg: #fdecea; --ok-bg: #e7f6ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1419; --card: #18202a; --text: #e8edf2; --muted: #93a0ae; --line: #2a3441;
+      --brand: #2fb67a; --brand-text: #06210f; --warn: #ffcf7a; --warn-bg: #3a2b0f; --err: #ff8a80; --err-bg: #3b1714; --ok-bg: #12301f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding-bottom: env(safe-area-inset-bottom); }
+  main { max-width: 560px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.25rem; margin: 8px 0 2px; }
+  h2 { font-size: 1rem; margin: 0 0 8px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; text-align: right; font-weight: 600; }
+  .total { font-size: 1.15rem; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  input[type=text], input[type=tel], select { width: 100%; font: inherit; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .doc { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .doc:first-of-type { border-top: 0; }
+  .doc small { color: var(--muted); display: block; }
+  .btn { appearance: none; border: 0; border-radius: 12px; padding: 14px 18px; font: inherit; font-weight: 700; cursor: pointer; background: var(--brand); color: var(--brand-text); width: 100%; }
+  .btn.sec { background: transparent; color: var(--text); border: 1px solid var(--line); width: auto; padding: 10px 14px; font-weight: 600; }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+  .chip { font-size: .85rem; padding: 2px 8px; border-radius: 99px; background: var(--warn-bg); color: var(--warn); white-space: nowrap; }
+  .chip.ok { background: var(--ok-bg); color: var(--brand); }
+  .msg { padding: 12px; border-radius: 10px; margin: 12px 0; }
+  .msg.err { background: var(--err-bg); color: var(--err); }
+  .msg.info { background: var(--warn-bg); color: var(--warn); }
+  details summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+  pre { white-space: pre-wrap; word-wrap: break-word; font: .85rem/1.5 ui-monospace, Menlo, Consolas, monospace; max-height: 50vh; overflow: auto; margin: 8px 0 0; }
+  .check { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0; font-weight: 400; }
+  .check input { width: 22px; height: 22px; margin-top: 2px; flex: none; }
+  .center { text-align: center; padding: 28px 16px; }
+  .big { font-size: 2.4rem; }
+  .hide { display: none !important; }
+  .spin { display: inline-block; width: 18px; height: 18px; border: 3px solid var(--line); border-top-color: var(--brand); border-radius: 50%; animation: gira .8s linear infinite; vertical-align: -3px; margin-right: 8px; }
+  @keyframes gira { to { transform: rotate(360deg); } }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <div id="carregando" class="card center"><span class="spin"></span>Carregando seu contrato…</div>
+  <div id="erro" class="card center hide"><div class="big">⚠️</div><h1 id="erroTitulo">Não foi possível abrir</h1><p id="erroTexto" class="sub"></p></div>
+
+  <div id="conteudo" class="hide">
+    <h1 id="titulo">Confirme seu contrato</h1>
+    <p class="sub" id="saudacao"></p>
+
+    <section class="card" aria-label="Condições do contrato">
+      <dl id="condicoes"></dl>
+    </section>
+
+    <details class="card">
+      <summary>Ler o contrato completo</summary>
+      <pre id="textoContrato"></pre>
+    </details>
+
+    <!-- Cliente que já assinou antes: só o botão -->
+    <section id="rapido" class="card hide">
+      <div class="msg info">Você já é nosso cliente: seus documentos e dados já estão cadastrados. É só conferir as condições e tocar em <b>Assinar</b>.</div>
+      <button class="btn" id="btnRapido" type="button">Assinar</button>
+      <p class="sub" style="margin:10px 0 0;font-size:.85rem" id="pixRapido"></p>
+    </section>
+
+    <!-- Cliente novo: documentos + dados -->
+    <form id="completo" class="hide" novalidate autocomplete="on">
+      <section class="card" id="blocoDocs">
+        <h2>1. Seus documentos</h2>
+        <p class="sub" style="margin-top:0">Tire uma foto de cada um. Só precisa fazer isso uma vez.</p>
+        <div id="listaDocs"></div>
+      </section>
+      <section class="card">
+        <h2>2. Seus dados</h2>
+        <label for="nome">Nome completo (igual ao cadastro)</label>
+        <input id="nome" type="text" autocomplete="name" required>
+        <label for="cpf">CPF ou CNPJ</label>
+        <input id="cpf" type="tel" inputmode="numeric" autocomplete="off" required>
+        <label for="pixTipo">Tipo da chave Pix para receber o dinheiro</label>
+        <select id="pixTipo">
+          <option value="CPF">CPF</option><option value="CNPJ">CNPJ</option><option value="CELULAR">Celular</option>
+          <option value="EMAIL">E-mail</option><option value="ALEATORIA">Chave aleatória</option>
+        </select>
+        <label for="pix">Chave Pix (precisa estar no seu nome)</label>
+        <input id="pix" type="text" autocomplete="off" required>
+        <label class="check"><input id="aceito" type="checkbox"><span>Li o contrato e concordo com as condições acima. As informações que prestei são verdadeiras.</span></label>
+        <button class="btn" id="btnAssinar" type="submit" disabled>Assinar</button>
+      </section>
+    </form>
+
+    <div id="aviso" class="msg err hide" role="alert"></div>
+  </div>
+
+  <div id="sucesso" class="card center hide">
+    <div class="big">✅</div>
+    <h1>Contrato assinado!</h1>
+    <p class="sub" id="sucessoTexto"></p>
+    <p class="sub" style="font-size:.85rem" id="sucessoHash"></p>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var token = new URLSearchParams(location.search).get('t') || '';
+  var dados = null;
+  var enviados = {};
+
+  var NOMES = { DOC_FRONT: ['Documento (frente)', 'RG ou CNH, com a foto aparecendo'], DOC_SELFIE: ['Selfie segurando o documento', 'Seu rosto e o documento na mesma foto'], ADDRESS_PROOF: ['Comprovante de endereço', 'Conta de luz, água ou internet'] };
+
+  function mostrar(id) { ['carregando', 'erro', 'conteudo', 'sucesso'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
+  function erroTela(titulo, texto) { $('erroTitulo').textContent = titulo; $('erroTexto').textContent = texto; mostrar('erro'); }
+  function aviso(texto) { var a = $('aviso'); a.textContent = texto || ''; a.classList.toggle('hide', !texto); if (texto) a.scrollIntoView({ block: 'center' }); }
+  function dataBr(ymd) { return ymd ? ymd.split('-').reverse().join('/') : ''; }
+  function so(d) { return (d || '').replace(/\D/g, ''); }
+
+  function api(path, opts) {
+    return fetch(path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { j._status = r.status; j._ok = r.ok; return j; });
+    });
+  }
+
+  function linha(dl, rotulo, valor, cls) {
+    var dt = document.createElement('dt'); dt.textContent = rotulo;
+    var dd = document.createElement('dd'); dd.textContent = valor; if (cls) dd.className = cls;
+    dl.appendChild(dt); dl.appendChild(dd);
+  }
+
+  function desenhar(d) {
+    var rapido = d.quickSign === true;
+    $('saudacao').textContent = 'Olá, ' + d.borrowerName.split(' ')[0] + '. Contrato nº ' + d.contractNumber + ' — ' + d.company;
+    $('titulo').textContent = rapido ? 'Sua nova proposta' : 'Confirme seu contrato';
+    var dl = $('condicoes');
+    linha(dl, 'Valor contratado', d.principal);
+    if (d.costsTotal && d.netToBorrower !== d.principal) linha(dl, 'Você recebe no Pix', d.netToBorrower);
+    var freq = d.frequency === 'DAILY' ? 'diárias' : 'semanais';
+    linha(dl, 'Parcelas', d.installmentsCount + ' ' + freq + ' de ' + d.installmentAmount);
+    linha(dl, 'Primeiro vencimento', dataBr(d.firstDueDate));
+    linha(dl, 'Custo efetivo (CET)', d.cetLabel);
+    linha(dl, 'Total a pagar', d.totalPayable, 'total');
+    $('textoContrato').textContent = d.contractText;
+
+    if (rapido) {
+      $('rapido').classList.remove('hide');
+      if (d.previousPixKey) $('pixRapido').textContent = 'O valor será enviado para a chave Pix que você usou antes (' + d.previousPixKey.mascarada + ').';
+    } else {
+      $('completo').classList.remove('hide');
+      var falta = d.missingDocuments || [];
+      $('blocoDocs').classList.toggle('hide', falta.length === 0);
+      falta.forEach(function (kind) { enviados[kind] = false; criarLinhaDoc(kind); });
+      // Recorrente sem Pix anterior: pede só a chave; documentos faltando: pede só os que faltam.
+      if (d.returningClient) { $('nome').closest('section').querySelector('h2').textContent = falta.length ? '2. Seus dados' : 'Seus dados'; }
+    }
+    mostrar('conteudo');
+  }
+
+  function criarLinhaDoc(kind) {
+    var wrap = document.createElement('div'); wrap.className = 'doc'; wrap.id = 'doc-' + kind;
+    var info = document.createElement('div');
+    var t = document.createElement('b'); t.textContent = NOMES[kind][0];
+    var s = document.createElement('small'); s.textContent = NOMES[kind][1];
+    info.appendChild(t); info.appendChild(s);
+    var dir = document.createElement('div'); dir.style.textAlign = 'right';
+    var chip = document.createElement('span'); chip.className = 'chip'; chip.id = 'chip-' + kind; chip.textContent = 'Falta enviar';
+    var input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*,application/pdf'; input.id = 'in-' + kind;
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn sec'; btn.id = 'bt-' + kind; btn.textContent = 'Tirar foto';
+    btn.style.marginTop = '6px';
+    if (kind !== 'ADDRESS_PROOF') input.setAttribute('capture', kind === 'DOC_SELFIE' ? 'user' : 'environment');
+    btn.addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', function () { if (input.files && input.files[0]) enviar(kind, input.files[0], chip, btn); });
+    dir.appendChild(chip); dir.appendChild(document.createElement('br')); dir.appendChild(btn); dir.appendChild(input);
+    wrap.appendChild(info); wrap.appendChild(dir);
+    $('listaDocs').appendChild(wrap);
+  }
+
+  // Reduz a foto no próprio celular (a câmera gera 5–10 MB; o limite do servidor é menor e o 4G agradece).
+  function reduzir(file) {
+    if (!/^image\//.test(file.type) || file.type === 'image/gif') return Promise.resolve(file);
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file); var img = new Image();
+      img.onload = function () {
+        var max = 1600, w = img.naturalWidth, h = img.naturalHeight, f = Math.min(1, max / Math.max(w, h));
+        var c = document.createElement('canvas'); c.width = Math.round(w * f); c.height = Math.round(h * f);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(function (b) { URL.revokeObjectURL(url); resolve(b && b.size < file.size ? b : file); }, 'image/jpeg', 0.82);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); }; // formato que o navegador não abre: envia como está
+      img.src = url;
+    });
+  }
+
+  function enviar(kind, file, chip, btn) {
+    aviso(''); chip.className = 'chip'; chip.textContent = 'Enviando…'; btn.disabled = true;
+    reduzir(file).then(function (blob) {
+      if (blob.size > 4 * 1024 * 1024) throw new Error('A foto ficou grande demais. Tire de novo com menos zoom.');
+      var fd = new FormData();
+      fd.append('kind', kind); // o campo vem ANTES do arquivo: o servidor lê na ordem
+      fd.append('file', blob, blob.type === 'image/jpeg' ? kind + '.jpg' : (file.name || kind));
+      return api('/p/contrato/' + encodeURIComponent(token) + '/documento', { method: 'POST', body: fd });
+    }).then(function (j) {
+      if (!j._ok) throw new Error(j.message || 'Não consegui enviar. Tente de novo.');
+      enviados[kind] = true; chip.className = 'chip ok'; chip.textContent = 'Enviado ✓'; btn.textContent = 'Trocar'; btn.disabled = false;
+      validar();
+    }).catch(function (e) {
+      chip.className = 'chip'; chip.textContent = 'Falta enviar'; btn.disabled = false; aviso(e.message || 'Falha no envio.');
+    });
+  }
+
+  function validar() {
+    var docsOk = Object.keys(enviados).every(function (k) { return enviados[k]; });
+    var campos = $('nome').value.trim().length >= 5 && (so($('cpf').value).length === 11 || so($('cpf').value).length === 14) && $('pix').value.trim().length >= 3;
+    $('btnAssinar').disabled = !(docsOk && campos && $('aceito').checked);
+  }
+
+  function assinar(corpo, botao) {
+    aviso(''); botao.disabled = true; var texto = botao.textContent; botao.textContent = 'Assinando…';
+    api('/p/contrato/' + encodeURIComponent(token) + '/aceite', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo) })
+      .then(function (j) {
+        if (!j._ok) { botao.disabled = false; botao.textContent = texto; aviso(j.message || 'Não foi possível assinar. Tente de novo.'); return; }
+        $('sucessoTexto').textContent = j.message || 'O valor será enviado para a sua chave Pix em instantes.';
+        $('sucessoHash').textContent = 'Código de verificação: ' + (j.hash || '');
+        mostrar('sucesso'); window.scrollTo(0, 0);
+      }).catch(function () { botao.disabled = false; botao.textContent = texto; aviso('Sem conexão. Verifique a internet e tente de novo.'); });
+  }
+
+  $('btnRapido').addEventListener('click', function () { assinar({ agreed: true }, $('btnRapido')); });
+  $('completo').addEventListener('submit', function (e) {
+    e.preventDefault();
+    assinar({ typedSignature: $('nome').value.trim(), signerDocument: so($('cpf').value), pixKey: $('pix').value.trim(), pixKeyType: $('pixTipo').value, agreed: true }, $('btnAssinar'));
+  });
+  ['nome', 'cpf', 'pix', 'aceito'].forEach(function (id) { $(id).addEventListener('input', validar); $(id).addEventListener('change', validar); });
+
+  if (token.length < 20) { erroTela('Link incompleto', 'Abra o link exatamente como foi enviado no WhatsApp.'); return; }
+  api('/p/contrato/' + encodeURIComponent(token)).then(function (j) {
+    if (!j._ok) { erroTela(j._status === 410 ? 'Link indisponível' : 'Não foi possível abrir', j.message || 'Tente novamente em alguns instantes.'); return; }
+    dados = j; desenhar(j);
+  }).catch(function () { erroTela('Sem conexão', 'Verifique a internet e abra o link de novo.'); });
+})();
+</script>
+</body>
+</html>

@@ -25,3 +25,13 @@
   ]
 
 # As rotas da API (/api/*, /p/*, /oauth/*, /webhooks/*, /health) são declaradas pela própria função (config.path em functions-src/api.mts).
+
+# Página de assinatura: o token do cliente está na URL, então nada de cache nem de vazamento por referência.
+[[headers]]
+  for = "/assinatura.html"
+  [headers.values]
+    Cache-Control = "no-store"
+    Referrer-Policy = "no-referrer"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"

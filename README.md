@@ -79,3 +79,10 @@ Documento, selfie e comprovante de endereço só são pedidos a quem **nunca ass
 - Respostas guardadas por até 20–30 s **e** validadas por uma consulta leve ("mudou algo?") que vale entre todas as cópias da função.
 - Operador e configurações guardados por 60 s / 30 s por cópia.
 - `keep-warm` (agendada, 07h–20h de Brasília) mantém a função e o banco acordados. Para desligar, crie `KEEP_WARM=off` no Netlify.
+
+## Página de assinatura (`public/assinatura.html`)
+Servida pelo próprio Netlify em `APP_PUBLIC_URL/assinatura.html?t=<token>`; fala com a API no mesmo endereço (sem CORS).
+- Cliente novo: tira as 3 fotos (reduzidas no celular antes de enviar), preenche nome, CPF/CNPJ e Pix e assina.
+- Cliente recorrente (`quickSign: true`): só o botão **Assinar**.
+- Cabeçalhos no `netlify.toml`: sem cache, sem `Referer`, sem iframe, CSP restrito (o token está na URL).
+- Teste no navegador (Chromium, tela de celular): `npm run test:db` (inclui `tests/assinatura.e2e.test.ts`).
