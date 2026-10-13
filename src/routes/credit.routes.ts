@@ -972,7 +972,8 @@ export async function creditRoutes(app: FastifyInstance) {
   app.get('/api/credito/cobrancas', async (req) => {
     const { date, limit, offset } = z.object({
       date: z.string().refine(isValidYmd).optional(),
-      limit: z.coerce.number().int().min(1).max(200).default(60),
+      // Padrão 200: painéis que não sabem pedir a próxima página (o painel antigo) continuam vendo tudo. O painel novo pede 40.
+      limit: z.coerce.number().int().min(1).max(200).default(200),
       offset: z.coerce.number().int().min(0).default(0),
     }).parse(req.query);
     const today = date ?? ymdSaoPaulo();
