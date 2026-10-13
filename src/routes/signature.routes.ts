@@ -81,6 +81,7 @@ export async function signatureRoutes(app: FastifyInstance) {
     const docs = await situacaoDocumentos(c.borrowerId, c.id);
     return {
       returningClient: docs.recorrente,
+      quickSign: docs.umClique, // true: a tela mostra só o botão Assinar
       documentsRequired: docs.faltando.length > 0,
       missingDocuments: docs.faltando,
       previousPixKey: docs.pixAnterior,
@@ -150,13 +151,15 @@ export async function signatureRoutes(app: FastifyInstance) {
   /** Aceite: registra assinatura, IP, dispositivo e a chave Pix de recebimento. */
   app.post('/p/contrato/:token/aceite', limit, async (req, reply) => {
     const { token } = z.object({ token: z.string().min(20).max(120) }).parse(req.params);
-    const body = z.object({
+    // Só agreed é sempre obrigatório (é o botão Assinar). Nome, documento e Pix só valem para cliente novo.
+    const campos = z.object({
       typedSignature: z.string().trim().min(5).max(200),
       signerDocument: z.string().transform(onlyDigits).refine((v) => v.length === 11 || v.length === 14, 'CPF ou CNPJ inválido'),
       pixKey: z.string().trim().min(3).max(150),
       pixKeyType: z.enum(['CPF', 'CNPJ', 'CELULAR', 'EMAIL', 'ALEATORIA']),
-      agreed: z.literal(true),
-    }).parse(req.body);
+    });
+    const base = z.object({ agreed: z.literal(true) }).and(campos.partial()).safeParse(req.body ?? {});
+    if (!base.success) return reply.code(400).send({ error: 'validation_error', message: 'Confirme a assinatura para continuar.' });
 
     const r = await loadByToken(token);
     if (!r.ok) return reply.code(410).send({ error: r.error, message: ERROS[r.error] });
@@ -171,6 +174,25 @@ export async function signatureRoutes(app: FastifyInstance) {
         missing: docs.faltando,
       });
     }
+
+    // Cliente que já assinou antes: um clique. Os dados vêm do cadastro e do contrato anterior; o link
+    // pessoal (32 bytes, vence em horas, uso único) é a credencial, e IP, aparelho e hash do texto ficam registrados.
+    let dados: z.infer<typeof campos>;
+    if (docs.umClique) {
+      dados = {
+        typedSignature: c.borrower.name, signerDocument: c.borrower.document,
+        pixKey: base.data.pixKey ?? docs.pixAnteriorCompleta!.chave,
+        pixKeyType: base.data.pixKeyType ?? (docs.pixAnteriorCompleta!.tipo as z.infer<typeof campos>['pixKeyType']),
+      };
+    } else {
+      const completo = campos.safeParse(base.data);
+      if (!completo.success) {
+        const faltam = completo.error.issues.map((i) => i.path.join('.')).join(', ');
+        return reply.code(400).send({ error: 'validation_error', message: `Preencha os dados para assinar (${faltam}).` });
+      }
+      dados = completo.data;
+    }
+    const body = { ...dados, agreed: true as const };
 
     if (!sameName(body.typedSignature, c.borrower.name)) {
       return reply.code(422).send({ error: 'name_mismatch', message: 'Digite seu nome completo exatamente como está no cadastro.' });
@@ -258,7 +280,7 @@ export async function signatureRoutes(app: FastifyInstance) {
           after: {
             contractHash: c.contractHash, signerDocument: body.signerDocument, pixKeyType: body.pixKeyType,
             diasAdiados: deslocamento, primeiroVencimento: novasDatas[0] ?? null,
-            clienteRecorrente: docs.recorrente, documentosReaproveitados: docs.recorrente,
+            clienteRecorrente: docs.recorrente, documentosReaproveitados: docs.recorrente, assinaturaUmClique: docs.umClique,
             userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
           } as Prisma.InputJsonValue,
         },

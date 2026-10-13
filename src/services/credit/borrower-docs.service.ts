@@ -13,6 +13,10 @@ export interface SituacaoDocs {
   faltando: RequiredDoc[];
   /** Chave Pix usada no contrato anterior, mascarada, para o cliente reconhecer. */
   pixAnterior: { tipo: string | null; mascarada: string } | null;
+  /** Uso interno (nunca sai na API): chave completa do contrato anterior, para o aceite de um clique. */
+  pixAnteriorCompleta: { chave: string; tipo: string } | null;
+  /** Assinatura de um clique: já assinou antes, tem todos os arquivos e a chave Pix anterior. */
+  umClique: boolean;
 }
 
 function mascarar(chave: string): string {
@@ -44,8 +48,11 @@ export async function situacaoDocumentos(borrowerId: string, contractId: string)
   const enviados = new Set(REQUIRED_DOCS.filter((k) => validos.includes(k)));
   const faltando = REQUIRED_DOCS.filter((k) => !enviados.has(k));
   const chave = anterior?.signature?.signerPixKey;
+  const tipo = anterior?.signature?.signerPixKeyType ?? null;
   return {
     recorrente, enviados, faltando,
-    pixAnterior: chave ? { tipo: anterior!.signature!.signerPixKeyType, mascarada: mascarar(chave) } : null,
+    pixAnterior: chave ? { tipo, mascarada: mascarar(chave) } : null,
+    pixAnteriorCompleta: chave && tipo ? { chave, tipo } : null,
+    umClique: recorrente && faltando.length === 0 && Boolean(chave && tipo),
   };
 }
