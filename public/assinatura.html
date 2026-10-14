@@ -102,7 +102,8 @@
         <label for="pix">Chave Pix (precisa estar no seu nome)</label>
         <input id="pix" type="text" autocomplete="off" required>
         <label class="check"><input id="aceito" type="checkbox"><span>Li o contrato e concordo com as condições acima. As informações que prestei são verdadeiras.</span></label>
-        <button class="btn" id="btnAssinar" type="submit" disabled>Assinar</button>
+        <div id="faltam" class="msg info small hide" aria-live="polite"></div>
+        <button class="btn" id="btnAssinar" type="submit">Assinar</button>
       </section>
     </form>
 
@@ -169,6 +170,7 @@
       falta.forEach(function (kind) { enviados[kind] = false; criarLinhaDoc(kind); });
       // Recorrente sem Pix anterior: pede só a chave; documentos faltando: pede só os que faltam.
       if (d.returningClient) { $('nome').closest('section').querySelector('h2').textContent = falta.length ? '2. Seus dados' : 'Seus dados'; }
+      validar();
     }
     mostrar('conteudo');
   }
@@ -225,10 +227,23 @@
     });
   }
 
+  /** O que ainda falta para poder assinar (em português claro). Vazio = pode assinar. */
+  function faltas() {
+    var f = [];
+    var docsFalta = Object.keys(enviados).filter(function (k) { return !enviados[k]; });
+    if (docsFalta.length) f.push('enviar a foto de: ' + docsFalta.map(function (k) { return NOMES[k][0].toLowerCase(); }).join(', '));
+    if ($('nome').value.trim().length < 5) f.push('digitar seu nome completo');
+    var n = so($('cpf').value).length; if (n !== 11 && n !== 14) f.push('digitar seu CPF ou CNPJ');
+    if ($('pix').value.trim().length < 3) f.push('digitar sua chave Pix');
+    if (!$('aceito').checked) f.push('marcar "Li o contrato e concordo"');
+    return f;
+  }
+  // O botão NUNCA fica "morto": se faltar algo, ele avisa exatamente o quê (antes ficava cinza e o cliente não sabia por quê).
   function validar() {
-    var docsOk = Object.keys(enviados).every(function (k) { return enviados[k]; });
-    var campos = $('nome').value.trim().length >= 5 && (so($('cpf').value).length === 11 || so($('cpf').value).length === 14) && $('pix').value.trim().length >= 3;
-    $('btnAssinar').disabled = !(docsOk && campos && $('aceito').checked);
+    var f = faltas(), el = $('faltam');
+    el.textContent = f.length ? 'Para assinar falta: ' + f.join('; ') + '.' : '';
+    el.classList.toggle('hide', !f.length);
+    if (!f.length) aviso(''); // tudo certo: some o aviso vermelho que ficou de antes
   }
 
   function assinar(corpo, botao) {
@@ -245,6 +260,8 @@
   $('btnRapido').addEventListener('click', function () { assinar({ agreed: true }, $('btnRapido')); });
   $('completo').addEventListener('submit', function (e) {
     e.preventDefault();
+    var f = faltas();
+    if (f.length) { aviso('Para assinar falta: ' + f.join('; ') + '.'); return; }
     assinar({ typedSignature: $('nome').value.trim(), signerDocument: so($('cpf').value), pixKey: $('pix').value.trim(), pixKeyType: $('pixTipo').value, agreed: true }, $('btnAssinar'));
   });
   ['nome', 'cpf', 'pix', 'aceito'].forEach(function (id) { $(id).addEventListener('input', validar); $(id).addEventListener('change', validar); });

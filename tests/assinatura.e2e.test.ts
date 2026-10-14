@@ -70,7 +70,11 @@ async function main() {
   await page.waitForSelector('#conteudo:not(.hide)');
   check('mostra as condições (valor, parcelas, total)', /R\$\s*300,00/.test(await page.textContent('#condicoes') ?? '') && /3 diárias/.test(await page.textContent('#condicoes') ?? ''));
   check('cliente novo vê o formulário completo e NÃO o botão rápido', await page.isVisible('#completo') && !(await page.isVisible('#rapido')));
-  check('começa com o botão Assinar desabilitado', await page.isDisabled('#btnAssinar'));
+  check('o botão Assinar NUNCA fica morto e a tela já diz o que falta', !(await page.isDisabled('#btnAssinar')) && /falta/i.test(await page.textContent('#faltam') ?? ''));
+  await page.click('#btnAssinar'); // toque cedo demais: tem que explicar, não ficar mudo
+  await page.waitForSelector('#aviso:not(.hide)');
+  check('tocar em Assinar com algo faltando explica exatamente o quê', /Para assinar falta/.test(await page.textContent('#aviso') ?? '') && /documento|nome|CPF|Pix|Li o contrato/i.test(await page.textContent('#aviso') ?? ''));
+  check('e não assina nada nesse toque', (await prisma.creditContract.findUniqueOrThrow({ where: { id: A.c.id } })).status === 'AWAITING_SIGNATURE');
   await page.screenshot({ path: `${SHOTS}/1-cliente-novo.png`, fullPage: true });
 
   for (const k of ['DOC_FRONT', 'DOC_SELFIE', 'ADDRESS_PROOF']) {
@@ -82,9 +86,10 @@ async function main() {
   await page.fill('#cpf', '12.345.678/0001-90');
   await page.fill('#pix', 'maria@pix.com');
   await page.selectOption('#pixTipo', 'EMAIL');
-  check('Assinar continua travado até marcar o aceite', await page.isDisabled('#btnAssinar'));
+  await page.click('#btnAssinar');
+  check('sem marcar "Li o contrato" o aviso pede para marcar', /Li o contrato/.test(await page.textContent('#aviso') ?? '') && (await prisma.creditContract.findUniqueOrThrow({ where: { id: A.c.id } })).status === 'AWAITING_SIGNATURE');
   await page.check('#aceito');
-  check('com tudo preenchido o botão Assinar libera', !(await page.isDisabled('#btnAssinar')));
+  check('com tudo preenchido somem a pendência e o aviso vermelho', !(await page.isVisible('#faltam')) && !(await page.isVisible('#aviso')));
   await page.screenshot({ path: `${SHOTS}/2-cliente-novo-preenchido.png`, fullPage: true });
   await page.click('#btnAssinar');
   await page.waitForSelector('#sucesso:not(.hide)');
