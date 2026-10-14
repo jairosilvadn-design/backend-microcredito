@@ -98,3 +98,4 @@ No Firebase Console → Authentication → Configurações → **Domínios autor
 Teste no navegador (celular): `tests/painel.e2e.test.ts` (só o SDK do Google é simulado; o token é um JWT real validado pela API).
 
 <!-- deploy com o acesso app_microcredito ao Supabase -->
+<!-- deploy 2: acesso app_microcredito criado no Supabase -->
