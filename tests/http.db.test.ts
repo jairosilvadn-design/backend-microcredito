@@ -171,6 +171,22 @@ async function main() {
   check('contrato cancelado e cliente volta a LEAD', (await prisma.creditContract.findUniqueOrThrow({ where: { id: ct3.body.id } })).status === 'CANCELLED' && (await prisma.borrower.findUniqueOrThrow({ where: { id: cli2.body.id } })).status === 'LEAD');
   const ct4 = await j('POST', '/api/credito/contratos', { borrowerId: cli2.body.id, principal: 200, installments: 10, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1), ratePercent: 20 });
   check('depois de cancelar, o cliente pode receber um novo contrato', ct4.code === 201, JSON.stringify(ct4.body));
+  // Prazo do link: mesmo com a configuração antiga em 1 hora, o link vale pelo menos 24 horas
+  const { saveSettings } = await import('../src/services/credit/settings.service');
+  await saveSettings({ signatureTtlHours: 1 });
+  await j('POST', `/api/credito/contratos/${ct4.body.id}/cancelar`, {});
+  const ct5 = await j('POST', '/api/credito/contratos', { borrowerId: cli2.body.id, principal: 200, installments: 10, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1), ratePercent: 20 });
+  const sig5 = await prisma.contractSignature.findFirstOrThrow({ where: { contractId: ct5.body.id } });
+  const horas = (sig5.expiresAt.getTime() - Date.now()) / 3600_000;
+  check(`link vale ${horas.toFixed(0)} h mesmo com a configuração antiga em 1 hora (mínimo 24 h)`, horas >= 23.9);
+  const r410 = await app.inject({ method: 'GET', url: '/p/contrato/' + 'z'.repeat(30) });
+  check('respostas da assinatura nunca ficam em cache (Cache-Control: no-store), nem o 410', r410.statusCode === 410 && r410.headers['cache-control'] === 'no-store');
+  const painelCfg = await j('PUT', '/api/credito/config', { signatureTtlHours: 1 });
+  check('a configuração não aceita mais prazo de link menor que 24 h', painelCfg.code === 400);
+  await j('POST', `/api/credito/contratos/${ct5.body.id}/cancelar`, {});
+  await saveSettings({ signatureTtlHours: 72 });
+  const ct4b = await j('POST', '/api/credito/contratos', { borrowerId: cli2.body.id, principal: 200, installments: 10, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1), ratePercent: 20 });
+  ct4.body.id = ct4b.body.id;
   const cancelSemCorpo = await j('POST', `/api/credito/contratos/${ct4.body.id}/cancelar`);
   check('cancelar sem corpo nenhum também funciona', cancelSemCorpo.code === 200, JSON.stringify(cancelSemCorpo.body));
   const comPagto = await j('POST', `/api/credito/contratos/${novo.body.id}/cancelar`, { reason: 'teste' });

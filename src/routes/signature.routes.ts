@@ -64,6 +64,10 @@ const ERROS: Record<LoadError, string> = {
 };
 
 export async function signatureRoutes(app: FastifyInstance) {
+  // Respostas desta página nunca podem ficar em cache (nem no navegador, nem na rede do Netlify): um 410 guardado
+  // deixaria o link "indisponível" mesmo depois de corrigido.
+  app.addHook('onSend', async (_req, reply) => { reply.header('Cache-Control', 'no-store'); });
+
   // Limite generoso, mas suficiente para travar tentativa de adivinhar token.
   const limit = { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } };
 
