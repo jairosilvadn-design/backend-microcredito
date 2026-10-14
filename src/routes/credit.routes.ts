@@ -9,7 +9,7 @@ import { SEGMENTS, estimateCapacity, getSegment, suggestPrincipal } from '../ser
 import { quote as buildQuote, lateCharge, computeCosts } from '../services/credit/pricing.service';
 import { parseStatement, summarize } from '../services/credit/statement.service';
 import { buildContractText, buildMessage, hashContract, shortHash, waLink } from '../services/credit/contract.service';
-import { canLendTo, ensureLevels, getSettings, saveSettings } from '../services/credit/settings.service';
+import { canLendTo, ensureLevels, getSettings, saveSettings, validadeDoLinkHoras } from '../services/credit/settings.service';
 import {
   MODOS, PADROES, limiteParaCliente, modoPara, projetarCaixa, recomendacoes, saudeDaCarteira, situacaoCaixa,
 } from '../services/credit/tesouraria.service';
@@ -329,7 +329,7 @@ export async function creditRoutes(app: FastifyInstance) {
       partnerName: z.string().trim().max(200).optional(),
       lateFeePercent: z.coerce.number().min(0).max(2).optional(),   // CDC: teto de 2%
       lateDailyPercent: z.coerce.number().min(0).max(0.5).optional(),
-      signatureTtlHours: z.coerce.number().int().min(1).max(720).optional(),
+      signatureTtlHours: z.coerce.number().int().min(24).max(720).optional(),
       maxPrincipalGlobal: z.coerce.number().min(50).max(100_000).optional(),
       minPrincipal: z.coerce.number().min(10).max(100_000).optional(),
       chargeIof: z.boolean().optional(),
@@ -692,7 +692,7 @@ export async function creditRoutes(app: FastifyInstance) {
         contractText: text, contractHash: hashContract(text),
         payToPixKey: settings.pixKey, createdById: req.operator!.id,
         signature: {
-          create: { token, expiresAt: new Date(Date.now() + settings.signatureTtlHours * 3600_000) },
+          create: { token, expiresAt: new Date(Date.now() + validadeDoLinkHoras(settings) * 3600_000) },
         },
         // As parcelas nascem junto do contrato: são exatamente as datas e os
         // valores que o cliente lê e assina. Depois disso não mudam sozinhas.
@@ -814,7 +814,7 @@ export async function creditRoutes(app: FastifyInstance) {
     const token = randomBytes(32).toString('base64url');
     await prisma.contractSignature.update({
       where: { contractId: id },
-      data: { token, expiresAt: new Date(Date.now() + settings.signatureTtlHours * 3600_000), openedAt: null },
+      data: { token, expiresAt: new Date(Date.now() + validadeDoLinkHoras(settings) * 3600_000), openedAt: null },
     });
     const link = `${env.APP_PUBLIC_URL}/assinatura.html?t=${token}`;
     const docs = await situacaoDocumentos(c.borrowerId, c.id);

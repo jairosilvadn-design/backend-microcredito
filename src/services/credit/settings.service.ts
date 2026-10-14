@@ -113,3 +113,9 @@ export function canLendTo(personType: 'PF' | 'PJ', regime: OperationSettings['re
   }
   return { allowed: true };
 }
+
+/**
+ * Validade do link de assinatura em horas. Nunca menos que 24 h, mesmo que a configuração antiga esteja curta
+ * (um prazo de 1 h fazia o link vencer com o cliente no meio do cadastro das fotos).
+ */
+export const validadeDoLinkHoras = (s: Pick<OperationSettings, 'signatureTtlHours'>) => Math.max(24, Number(s.signatureTtlHours) || 72);

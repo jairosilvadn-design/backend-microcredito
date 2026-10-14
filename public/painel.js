@@ -407,7 +407,9 @@
         (ativo ? '<dt>Falta receber hoje</dt><dd>' + money(c.aReceberHoje) + '</dd><dt>Já pago</dt><dd>' + money(c.totalPago) + '</dd>' : '') + '</dl></div>';
 
       if (c.status === 'AWAITING_SIGNATURE' && c.signature && c.signature.link) {
-        h += '<div class="card"><h3>Aguardando assinatura</h3><div class="muted small" style="word-break:break-all">' + esc(c.signature.link) + '</div><div class="acoes"><button class="btn sm" id="btCopiar">Copiar link</button><button class="btn sm sec" id="btReenviar">Gerar link novo / WhatsApp</button></div><div id="reenvio"></div></div>';
+        var vence = c.signature.expiresAt ? new Date(c.signature.expiresAt) : null, vencido = vence && vence.getTime() < Date.now();
+        var quando = vence ? vence.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+        h += '<div class="card"><h3>Aguardando assinatura</h3>' + (vence ? (vencido ? '<div class="msg err small"><b>Este link venceu em ' + esc(quando) + '.</b> Gere um link novo e mande de novo ao cliente.</div>' : '<div class="muted small">Link válido até <b>' + esc(quando) + '</b>.</div>') : '') + '<div class="muted small" style="word-break:break-all">' + esc(c.signature.link) + '</div><div class="acoes"><button class="btn sm" id="btCopiar">Copiar link</button><button class="btn sm sec" id="btReenviar">Gerar link novo / WhatsApp</button></div><div id="reenvio"></div></div>';
       }
       if (ativo && !c.pixConfirmado) {
         h += '<div class="card"><h3>Enviar o Pix ao cliente</h3><div class="msg warn small">Envie <b>' + money(c.netToBorrower) + '</b> para a chave abaixo e depois confirme.</div>' +
