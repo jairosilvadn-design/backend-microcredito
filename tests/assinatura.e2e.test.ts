@@ -83,7 +83,10 @@ async function main() {
   }
   check('os 3 documentos subiram pelo celular', (await prisma.borrowerDocument.count({ where: { contractId: A.c.id } })) === 3);
   await page.fill('#nome', 'Maria da Silva Comercio');
-  await page.fill('#cpf', '12.345.678/0001-90');
+  await page.fill('#cpf', '1234567800019'); // 13 números: erro comum do cliente
+  check('CPF/CNPJ com número a menos/mais explica na hora ("confira")', /confira|faltam/i.test(await page.textContent('#cpfDica') ?? ''));
+  await page.fill('#cpf', '12345678000190');
+  check('CPF/CNPJ é formatado enquanto digita e confirma a quantidade de números', (await page.inputValue('#cpf')) === '12.345.678/0001-90' && /CNPJ com 14/.test(await page.textContent('#cpfDica') ?? ''));
   await page.fill('#pix', 'maria@pix.com');
   await page.selectOption('#pixTipo', 'EMAIL');
   await page.click('#btnAssinar');

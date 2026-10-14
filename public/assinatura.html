@@ -94,6 +94,7 @@
         <input id="nome" type="text" autocomplete="name" required>
         <label for="cpf">CPF ou CNPJ</label>
         <input id="cpf" type="tel" inputmode="numeric" autocomplete="off" required>
+        <div id="cpfDica" class="small" style="color:var(--muted);margin-top:4px"></div>
         <label for="pixTipo">Tipo da chave Pix para receber o dinheiro</label>
         <select id="pixTipo">
           <option value="CPF">CPF</option><option value="CNPJ">CNPJ</option><option value="CELULAR">Celular</option>
@@ -263,6 +264,32 @@
     var f = faltas();
     if (f.length) { aviso('Para assinar falta: ' + f.join('; ') + '.'); return; }
     assinar({ typedSignature: $('nome').value.trim(), signerDocument: so($('cpf').value), pixKey: $('pix').value.trim(), pixKeyType: $('pixTipo').value, agreed: true }, $('btnAssinar'));
+  });
+  // CPF/CNPJ: formata enquanto digita e conta os números (era o erro mais comum: dígito a mais ou a menos e o botão não destravava).
+  function formatarDoc(d) {
+    d = d.slice(0, 14);
+    if (d.length <= 11) return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    return d.replace(/(\d{2})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1/$2').replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+  }
+  function dicaDoc() {
+    var n = so($('cpf').value).length, el = $('cpfDica');
+    if (n === 0) { el.textContent = ''; return; }
+    if (n === 11) { el.textContent = '✓ CPF com 11 números'; el.style.color = 'var(--brand)'; }
+    else if (n === 14) { el.textContent = '✓ CNPJ com 14 números'; el.style.color = 'var(--brand)'; }
+    else if (n < 11) { el.textContent = 'CPF tem 11 números: faltam ' + (11 - n) + '.'; el.style.color = 'var(--err)'; }
+    else if (n < 14) { el.textContent = 'Tem ' + n + ' números. CPF tem 11 e CNPJ tem 14: confira.'; el.style.color = 'var(--err)'; }
+  }
+  var ultimoDocNoPix = '';
+  $('cpf').addEventListener('input', function () {
+    var d = so($('cpf').value).slice(0, 14);
+    $('cpf').value = formatarDoc(d); dicaDoc();
+    // Pix por CPF/CNPJ: copia o número para a chave, se o cliente ainda não digitou outra coisa.
+    var tipo = $('pixTipo').value, pixAtual = so($('pix').value);
+    if ((tipo === 'CPF' || tipo === 'CNPJ') && (pixAtual === '' || pixAtual === ultimoDocNoPix)) { $('pix').value = d; ultimoDocNoPix = d; validar(); }
+  });
+  $('pixTipo').addEventListener('change', function () {
+    if (($('pixTipo').value === 'CPF' || $('pixTipo').value === 'CNPJ') && $('pix').value.trim() === '') { var d = so($('cpf').value); $('pix').value = d; ultimoDocNoPix = d; }
+    validar();
   });
   ['nome', 'cpf', 'pix', 'aceito'].forEach(function (id) { $(id).addEventListener('input', validar); $(id).addEventListener('change', validar); });
 
