@@ -96,3 +96,5 @@ Login Google (Firebase) — variáveis no Netlify (valores públicos do app Web 
 `FIREBASE_WEB_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_SENDER_ID` (e opcional `FIREBASE_AUTH_DOMAIN`). O build grava `public/config.js` com elas (`scripts/write-public-config.mjs`).
 No Firebase Console → Authentication → Configurações → **Domínios autorizados**, adicione o domínio do site.
 Teste no navegador (celular): `tests/painel.e2e.test.ts` (só o SDK do Google é simulado; o token é um JWT real validado pela API).
+
+<!-- deploy com o acesso app_microcredito ao Supabase -->
