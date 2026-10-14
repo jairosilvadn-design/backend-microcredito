@@ -12,7 +12,9 @@ const env = { ...e, DATABASE_URL: direct, DIRECT_URL: direct };
 try { const u = new URL(direct); console.log(`prepare-db: banco em uso: ${u.hostname}:${u.port || '5432'}${u.pathname} (usuário ${u.username})`); } catch { console.log('prepare-db: endereço do banco inválido (confira DIRECT_URL: senha com símbolos precisa ser codificada)'); }
 
 try {
-  execSync('npx prisma db push --skip-generate', { stdio: 'inherit', env });
+  // DB_PUSH=off: o banco já existe (ex.: Supabase do cliente) e o acesso usado só lê e grava dados, sem criar tabelas/índices.
+  if (e.DB_PUSH === 'off') console.log('prepare-db: DB_PUSH=off, pulando a atualização das tabelas.');
+  else execSync('npx prisma db push --skip-generate', { stdio: 'inherit', env });
 } catch (err) {
   console.error('\nprepare-db: FALHOU ao atualizar o banco. Nada foi apagado. Se o erro for P1000, a senha do banco está errada ou tem símbolo sem codificar (@ vira %40, # vira %23, / vira %2F).');
   throw err;
