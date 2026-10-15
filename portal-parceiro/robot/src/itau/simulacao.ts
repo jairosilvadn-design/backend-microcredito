@@ -68,19 +68,36 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
   });
 
   return etapa('simular-e-ler', async () => {
-    const respostaP = page.waitForResponse((r) => r.request().method() === 'POST' && /EnviarSimulacaoModernizadaV2/i.test(r.url()), { timeout: config.ROBO_TIMEOUT_MS });
+    const ESPERA_RESPOSTA = Math.max(config.ROBO_TIMEOUT_MS * 3, 90_000); // o cálculo do banco pode demorar bem mais que um clique
+    let pedidoIniciado = false;
+    page.on('request', (r) => { if (/EnviarSimulacaoModernizadaV2/i.test(r.url())) pedidoIniciado = true; });
+    const respostaP = page.waitForResponse((r) => r.request().method() === 'POST' && /EnviarSimulacaoModernizadaV2/i.test(r.url()), { timeout: ESPERA_RESPOSTA });
     // Regras do portal (idade, prazo, entrada mínima, valor mínimo do imóvel...) aparecem como janela (bootbox) ou alert nativo.
-    const bootboxP = page.waitForSelector('.bootbox.modal .bootbox-body', { state: 'visible', timeout: config.ROBO_TIMEOUT_MS })
+    const bootboxP = page.waitForSelector('.bootbox.modal .bootbox-body', { state: 'visible', timeout: ESPERA_RESPOSTA })
       .then((el) => el.innerText());
     const alertaP = new Promise<string>((res) => { page.once('dialog', (d) => { const m = d.message(); void d.dismiss().catch(() => undefined); res(m); }); });
     respostaP.catch(() => undefined); bootboxP.catch(() => undefined); // o perdedor da corrida não pode virar "unhandled rejection"
 
     await page.click(S.form.simular);
+
+    // Se nada foi enviado em poucos segundos e não há janela de aviso, o formulário do portal bloqueou o envio: dizemos quais campos.
+    const semPedido = (async () => {
+      for (let i = 0; i < 16 && !pedidoIniciado; i++) await page.waitForTimeout(500);
+      if (pedidoIniciado) return new Promise<never>(() => undefined); // enviou: segue a espera normal
+      const invalidos = await page.evaluate(() => Array.from(document.querySelectorAll('#frmSimulacao input:not([disabled]):not([type=hidden]), #frmSimulacao select:not([disabled])'))
+        .filter((el) => { const e = el as HTMLInputElement; return (e.willValidate && !e.checkValidity()) || !!e.closest('.has-error'); })
+        .map((el) => { const e = el as HTMLInputElement; const msg = (e.closest('.form-group')?.querySelector('.help-block')?.textContent ?? '').trim() || e.validationMessage; return `${e.id || e.name}: ${msg}`; }).slice(0, 6)).catch(() => [] as string[]);
+      return { tipo: 'bloqueado' as const, invalidos };
+    })();
+    semPedido.catch(() => undefined);
+
     const vencedor = await Promise.race([
       respostaP.then((r) => ({ tipo: 'resposta' as const, r })),
       bootboxP.then((t) => ({ tipo: 'regra' as const, t })),
       alertaP.then((t) => ({ tipo: 'regra' as const, t })),
+      semPedido,
     ]);
+    if (vencedor.tipo === 'bloqueado') throw new RoboError('DADOS_INVALIDOS', `O portal não aceitou o envio do formulário${vencedor.invalidos.length ? `: ${vencedor.invalidos.join('; ')}` : ' (sem aviso na tela)'}`, false, 'simular', vencedor.invalidos.join(' | '));
     if (vencedor.tipo === 'regra') throw new RoboError('DADOS_INVALIDOS', `Portal recusou os dados: ${vencedor.t.replace(/\s+/g, ' ').trim()}`, false, 'simular');
 
     const resp = vencedor.r;
