@@ -7,7 +7,9 @@ import { executarProposta, executarSimulacao } from './itau/executar.js';
 import { log } from './logger.js';
 import type { DadosProposta, DadosSimulacao } from './types.js';
 
-initializeApp({ credential: cert(JSON.parse(Buffer.from(config.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8'))) });
+// Aceita a chave do Firebase colada como JSON puro (mais simples) ou em base64.
+const chaveBruta = config.FIREBASE_SERVICE_ACCOUNT_B64.trim();
+initializeApp({ credential: cert(JSON.parse(chaveBruta.startsWith('{') ? chaveBruta : Buffer.from(chaveBruta, 'base64').toString('utf8'))) });
 const db = getFirestore();
 const limite = pLimit(config.ROBO_CONCURRENCY); // fila em memória: no máx. N navegadores ao mesmo tempo
 const WORKER_ID = `${process.env.HOSTNAME ?? 'local'}-${process.pid}`;
