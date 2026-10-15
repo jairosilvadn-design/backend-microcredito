@@ -43,14 +43,14 @@
   <section id="tela-simulacao" class="hidden">
     <h2>Nova simulação</h2>
     <form id="form-sim">
-      <label>CPF <input id="cpf" inputmode="numeric" maxlength="14" required></label>
+      <label>CPF <input id="cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" required></label>
       <label>Data de nascimento <input id="nasc" type="date" required></label>
-      <label>Renda bruta mensal (R$) <input id="renda" type="number" step="0.01" min="0" required></label>
+      <label>Renda bruta mensal (R$) <input id="renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
       <label>Usará FGTS?
         <select id="fgts"><option value="nao">Não</option><option value="sim">Sim</option></select></label>
-      <label id="fgts-valor-l" class="hidden">Valor do FGTS (R$) <input id="fgtsValor" type="number" step="0.01" min="0"></label>
-      <label>Valor do imóvel (R$) <input id="imovel" type="number" step="0.01" min="1" required></label>
-      <label>Valor do financiamento (R$) <input id="financ" type="number" step="0.01" min="1" required></label>
+      <label id="fgts-valor-l" class="hidden">Valor do FGTS (R$) <input id="fgtsValor" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off"></label>
+      <label>Valor do imóvel (R$) <input id="imovel" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
+      <label>Valor do financiamento (R$) <input id="financ" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
       <label>Sistema de amortização
         <select id="sistema"><option>SAC</option><option>PRICE</option></select></label>
       <button id="enviar">Enviar para Análise de Crédito</button>

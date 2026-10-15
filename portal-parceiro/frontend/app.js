@@ -12,6 +12,16 @@ const $ = (id) => document.getElementById(id);
 const telas = ['tela-login', 'tela-pendente', 'tela-simulacao', 'tela-resultado'];
 const mostrar = (t) => telas.forEach((x) => $(x).classList.toggle('hidden', x !== t));
 const soDigitos = (s) => s.replace(/\D/g, '');
+// Máscara de dinheiro: digita só números e o campo vira "R$ 1.234,56" (os dois últimos dígitos são os centavos).
+const fmtBRL = (centavos) => (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const valor = (id) => Number(soDigitos($(id).value || '0')) / 100; // número em reais
+document.querySelectorAll('[data-moeda]').forEach((el) => {
+  el.addEventListener('input', () => { const d = soDigitos(el.value); el.value = d ? fmtBRL(Number(d)) : ''; });
+});
+$('cpf').addEventListener('input', () => {
+  const d = soDigitos($('cpf').value).slice(0, 11);
+  $('cpf').value = d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+});
 let cadastro = false;
 let unsubProposta = null;
 
@@ -54,15 +64,17 @@ $('form-sim').onsubmit = async (e) => {
   const btn = $('enviar'); $('msg-sim').textContent = '';
   const cpf = soDigitos($('cpf').value);
   if (cpf.length !== 11) return ($('msg-sim').textContent = 'CPF inválido.');
+  if (valor('renda') <= 0 || valor('imovel') <= 0 || valor('financ') <= 0) return ($('msg-sim').textContent = 'Preencha renda, valor do imóvel e valor do financiamento.');
+  if (valor('financ') > valor('imovel')) return ($('msg-sim').textContent = 'O financiamento não pode ser maior que o valor do imóvel.');
   btn.disabled = true; btn.textContent = 'Analisando no banco… (pode levar até 1–2 min)';
   try {
     const { claims } = await auth.currentUser.getIdTokenResult();
     const ref = await addDoc(collection(db, 'propostas'), {
       status: 'pendente', resultado: null, erro: null, tentativas: 0,
       corretorUid: auth.currentUser.uid, imobiliariaId: claims.imobiliariaId,
-      cliente: { cpf, nascimento: $('nasc').value, rendaBruta: +$('renda').value,
-                 fgts: $('fgts').value === 'sim', fgtsValor: $('fgts').value === 'sim' ? +$('fgtsValor').value : 0 },
-      operacao: { valorImovel: +$('imovel').value, valorFinanciamento: +$('financ').value, sistema: $('sistema').value },
+      cliente: { cpf, nascimento: $('nasc').value, rendaBruta: valor('renda'),
+                 fgts: $('fgts').value === 'sim', fgtsValor: $('fgts').value === 'sim' ? valor('fgtsValor') : 0 },
+      operacao: { valorImovel: valor('imovel'), valorFinanciamento: valor('financ'), sistema: $('sistema').value },
       criadoEm: serverTimestamp(),
     });
     // Tempo real: o robô atualiza o documento e o onSnapshot devolve o resultado na tela.
