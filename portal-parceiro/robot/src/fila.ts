@@ -65,20 +65,22 @@ async function processar(ref: DocumentReference) {
 
 export function iniciarWorker() {
   // Escuta propostas pendentes (mais antigas primeiro). Cada novo doc dispara processar().
-  db.collection('propostas').where('status', '==', 'pendente').orderBy('criadoEm').limit(50).onSnapshot(
+  // Só igualdade em um campo (não exige índice composto no Firestore).
+  db.collection('propostas').where('status', '==', 'pendente').limit(50).onSnapshot(
     (qs) => qs.docChanges().filter((c) => c.type !== 'removed').forEach((c) => { void limite(() => processar(c.doc.ref)); }),
-    (e) => { log.error({ err: e.message }, 'listener caiu'); process.exit(1); }, // o orquestrador reinicia o container
+    (e) => { log.error(`listener caiu: ${e.message}`); process.exit(1); }, // o orquestrador reinicia o container
   );
 
   // "Reaper": propostas presas em 'processando' (worker morreu) voltam para a fila.
-  setInterval(async () => {
+  setInterval(async () => { try {
     const corte = Timestamp.fromMillis(Date.now() - config.ROBO_LOCK_TTL_MS);
-    const presas = await db.collection('propostas').where('status', '==', 'processando').where('travadoEm', '<', corte).get();
+    const todas = await db.collection('propostas').where('status', '==', 'processando').get(); // filtro de tempo em código: evita índice composto
+    const presas = { docs: todas.docs.filter((d) => ((d.data().travadoEm as Timestamp | undefined)?.toMillis() ?? 0) < corte.toMillis()) };
     for (const d of presas.docs) {
       const esgotou = d.data().tipo === 'proposta' || (d.data().tentativas ?? 0) >= config.ROBO_MAX_TENTATIVAS;
       await d.ref.update(esgotou ? { status: 'erro', erro: { codigo: d.data().tipo === 'proposta' ? 'ENVIO_INCERTO' : 'TIMEOUT', etapa: 'worker', mensagemUsuario: d.data().tipo === 'proposta' ? 'O robô parou durante o envio: confira no portal do Itaú se a proposta foi criada antes de reenviar.' : 'Tente novamente.' } } : { status: 'pendente', worker: null });
     }
-  }, 60_000).unref();
+  } catch (e) { log.warn(`varredura de propostas presas falhou: ${(e as Error).message}`); } }, 60_000).unref();
 
   log.info({ concorrencia: config.ROBO_CONCURRENCY }, 'robô ouvindo a fila');
 }

@@ -257,11 +257,12 @@ async function carregarHistorico() {
   const corpo = $('hist-corpo'); corpo.textContent = 'Carregando…';
   const admin = claimsAtuais.role === 'admin';
   const base = collection(db, 'propostas');
+  // Sem orderBy junto do where (evita criar índice composto no Firestore); a ordenação é feita aqui.
   const q = admin ? query(base, orderBy('criadoEm', 'desc'), limit(300))
-    : claimsAtuais.gestor ? query(base, where('imobiliariaId', '==', claimsAtuais.imobiliariaId), orderBy('criadoEm', 'desc'), limit(300))
-    : query(base, where('corretorUid', '==', auth.currentUser.uid), orderBy('criadoEm', 'desc'), limit(200));
+    : claimsAtuais.gestor ? query(base, where('imobiliariaId', '==', claimsAtuais.imobiliariaId), limit(300))
+    : query(base, where('corretorUid', '==', auth.currentUser.uid), limit(200));
   $('hist-titulo').textContent = admin ? 'Todas as simulações e propostas' : claimsAtuais.gestor ? 'Simulações e propostas da imobiliária' : 'Suas simulações e propostas';
-  try { docsHist = (await getDocs(q)).docs.map((d) => d.data()); }
+  try { docsHist = (await getDocs(q)).docs.map((d) => d.data()).sort((a, b) => (b.criadoEm?.toMillis?.() ?? 0) - (a.criadoEm?.toMillis?.() ?? 0)); }
   catch (err) { corpo.textContent = 'Não foi possível carregar (' + err.code + ').'; return; }
   renderHistorico();
 }
