@@ -14,3 +14,15 @@ export const ENTRADA_MIN_PERCENTUAL = 20;          // financia no máximo 80% do
 export const PRAZO_MAX_MESES = { RESIDENCIAL: 420, COMERCIAL: 240 };
 export const PRAZO_MIN_MESES = 12, PRAZO_MIN_MIX_RESIDENCIAL = 48;
 export const IDADE_PRAZO_MAX_MESES = 966;           // A CONFIRMAR (vem de prazos.js, que não temos): idade + prazo <= 80a6m. O portal valida de novo.
+
+// ---- Tela "Enviar proposta → Isolado" do portal (copiado do HTML real; value = o que o portal envia, texto = o que o usuário vê) ----
+export const propostaOpcoes = {
+  tipoImovel: [['RESIDENTIAL', 'Residencial'], ['COMMERCIAL', 'Comercial']],
+  seguradora: [['ITAÚ SEGUROS', 'ITAÚ SEGUROS'], ['TOKIO MARINE', 'TOKIO MARINE']],
+  sistema: [['SAC', 'SAC'], ['HYBRID', 'MIX']],
+  tipoRenda: [['Assalariado', 'Assalariado'], ['Aposentado', 'Aposentado'], ['Socio_Proprietario', 'Sócio Proprietário'], ['Autonomo', 'Autônomo'], ['Profissional_Liberal', 'Profissional Liberal']],
+  estadoCivil: [['MARRIED', 'CASADO'], ['DIVORCED', 'DIVORCIADO'], ['SEPARATED', 'SEPARADO'], ['SINGLE', 'SOLTEIRO'], ['WIDOWER', 'VIUVO']],
+  estadoCivilConjuge: [['DIVORCED', 'DIVORCIADO'], ['SEPARATED', 'SEPARADO'], ['SINGLE', 'SOLTEIRO'], ['WIDOWER', 'VIUVO']], // (cônjuge de união estável: sem "casado")
+};
+// Texto de consentimento que o portal exige marcar antes de enviar. É uma declaração do corretor sobre a autorização DO CLIENTE:
+export const TEXTO_SCR = 'O cliente foi informado e autorizou a consulta das suas informações mantidas no sistema de informações de crédito (SCR) organizado pelo Banco Central do Brasil.';
