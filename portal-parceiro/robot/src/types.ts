@@ -9,18 +9,22 @@ export interface DadosSimulacao {
     financiarItbi: boolean; valorImovel: number; entrada: number; prazoMeses: number;
   };
 }
-/** Resultado da tela de simulação do portal (ids lbl e col). É uma SIMULAÇÃO: não há "aprovado/recusado". */
+/** Resposta de /api/Simulacao/EnviarSimulacaoModernizadaV2/ (a mesma que o botão Simular do portal usa para preencher a tela).
+ *  É uma SIMULAÇÃO: não há "aprovado/recusado" (a aprovação só vem na análise da proposta). */
 export interface ResultadoItau {
   status: 'SIMULADO';
+  idSimulacao: string | number | null;
+  dataSimulacao: string | null;
   prazoMeses: number | null;
+  valorImovel: number | null;
+  entrada: number | null;
+  valorFinanciado: number | null;
   primeiraParcela: number | null;
   ultimaParcela: number | null;
   somatorioParcelas: number | null;
-  valorTotalFinanciado: number | null;
-  sistema: string | null;
-  seguradora: string | null;
+  sistema: 'SAC' | 'MIX' | string | null;
   linhaCredito: string | null;
-  taxaJuros: string | null;
-  cet: string | null;
-  dataSimulacao: string | null;
+  taxaJurosAnual: number | null;
+  cetAnual: number | null;
+  ceshAnual: number | null;
 }

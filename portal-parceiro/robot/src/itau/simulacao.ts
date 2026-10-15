@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import type { Comprador, DadosSimulacao, ResultadoItau } from '../types.js';
 import { RoboError } from './erros.js';
 import { S } from './seletores.js';
-import { brParaNumero, centavos, etapa, textoOuNull } from './utils.js';
+import { centavos, etapa } from './utils.js';
 
 /** Campos com máscara (jquery.mask / maskMoney): digitar tecla a tecla é mais fiel que fill(). */
 const digitar = async (page: Page, sel: string, texto: string) => {
@@ -32,6 +32,7 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
 
   await etapa('comprador-principal', async () => {
     const c = d.cliente;
+    await page.focus(S.form.nome); // o foco dispara o carregamento das listas (tipo de imóvel, seguradora, sistema)
     await preencherComprador(page, { nome: S.form.nome, cpf: S.form.cpf, nascimento: S.form.nascimento, cep: S.form.cep, renda: S.form.renda, celular: S.form.celular, email: S.form.email }, c);
     await page.selectOption(S.form.segmento, { label: c.segmento });
     await page.selectOption(S.form.estadoCivil, { label: c.estadoCivil });
@@ -54,32 +55,46 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
     await page.fill(S.form.prazo, String(o.prazoMeses));
   });
 
-  await etapa('simular', async () => {
-    await page.click(S.form.simular);
-    // O botão valida o formulário (bootstrap validator): se algo estiver inválido a tela de resultado nunca aparece.
-    await page.waitForFunction((sel) => {
-      const el = document.querySelector(sel);
-      return !!el && /\d/.test(el.textContent ?? '') && !/R\$\s*0,00/.test(el.textContent ?? '');
-    }, S.resultado.pronto);
-  });
+  return etapa('simular-e-ler', async () => {
+    const respostaP = page.waitForResponse((r) => r.request().method() === 'POST' && /EnviarSimulacaoModernizadaV2/i.test(r.url()), { timeout: config.ROBO_TIMEOUT_MS });
+    // Regras do portal (idade, prazo, entrada mínima, valor mínimo do imóvel...) aparecem como janela (bootbox) ou alert nativo.
+    const bootboxP = page.waitForSelector('.bootbox.modal .bootbox-body', { state: 'visible', timeout: config.ROBO_TIMEOUT_MS })
+      .then((el) => el.innerText());
+    const alertaP = new Promise<string>((res) => { page.once('dialog', (d) => { const m = d.message(); void d.dismiss().catch(() => undefined); res(m); }); });
+    respostaP.catch(() => undefined); bootboxP.catch(() => undefined); // o perdedor da corrida não pode virar "unhandled rejection"
 
-  return etapa('ler-resultado', async () => {
-    const r = S.resultado;
-    const primeira = brParaNumero(await textoOuNull(page, r.primeiraParcela));
-    if (primeira == null) throw new RoboError('RESPOSTA_ILEGIVEL', 'Resultado da simulação não encontrado (layout mudou?)', false, 'ler-resultado');
+    await page.click(S.form.simular);
+    const vencedor = await Promise.race([
+      respostaP.then((r) => ({ tipo: 'resposta' as const, r })),
+      bootboxP.then((t) => ({ tipo: 'regra' as const, t })),
+      alertaP.then((t) => ({ tipo: 'regra' as const, t })),
+    ]);
+    if (vencedor.tipo === 'regra') throw new RoboError('DADOS_INVALIDOS', `Portal recusou os dados: ${vencedor.t.replace(/\s+/g, ' ').trim()}`, false, 'simular');
+
+    const resp = vencedor.r;
+    if (!resp.ok()) {
+      const msg = (await resp.text().catch(() => '')).slice(0, 200);
+      throw new RoboError(resp.status() >= 500 ? 'PORTAL_INDISPONIVEL' : 'DADOS_INVALIDOS', `Portal respondeu ${resp.status()}: ${msg}`, resp.status() >= 500, 'simular');
+    }
+    const j = await resp.json().catch(() => null) as Record<string, any> | null;
+    if (!j || typeof j !== 'object' || j.period == null || j.firstInstallment == null) throw new RoboError('RESPOSTA_ILEGIVEL', 'Resposta da simulação em formato inesperado (portal mudou?)', false, 'ler-resultado');
+    const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
     return {
       status: 'SIMULADO',
-      prazoMeses: brParaNumero(await textoOuNull(page, r.prazo)),
-      primeiraParcela: primeira,
-      ultimaParcela: brParaNumero(await textoOuNull(page, r.ultimaParcela)),
-      somatorioParcelas: brParaNumero(await textoOuNull(page, r.somatorio)),
-      valorTotalFinanciado: brParaNumero(await textoOuNull(page, r.totalFinanciado)),
-      sistema: await textoOuNull(page, r.sistema),
-      seguradora: await textoOuNull(page, r.seguradora),
-      linhaCredito: await textoOuNull(page, r.linhaCredito),
-      taxaJuros: await textoOuNull(page, r.taxa),
-      cet: await textoOuNull(page, r.cet),
-      dataSimulacao: await textoOuNull(page, r.data),
-    };
+      idSimulacao: j.idSimulation ?? null,
+      dataSimulacao: j.dataSimulation ? String(j.dataSimulation) : null,
+      prazoMeses: n(Number(j.period)),
+      valorImovel: n(j.propertyPrice),
+      entrada: n(j.downPayment),
+      valorFinanciado: n(j.loanAmount),
+      primeiraParcela: n(j.firstInstallment?.totalValue),
+      ultimaParcela: n(j.lastInstallment?.totalValue),
+      somatorioParcelas: n(j.installmentsTotalValue),
+      sistema: String(j.amortizationType ?? '').toUpperCase() === 'HYBRID' ? 'MIX' : String(j.amortizationType ?? '').toUpperCase() || null,
+      linhaCredito: j.financingType ? String(j.financingType).toUpperCase() : null,
+      taxaJurosAnual: n(Number(j.annualRate)),
+      cetAnual: n(j.cetAnnual),
+      ceshAnual: n(j.ceshAnnual),
+    } satisfies ResultadoItau;
   });
 }

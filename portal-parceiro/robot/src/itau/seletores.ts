@@ -18,9 +18,4 @@ export const S = {
     valorImovel: '#txtValorImovel', entrada: '#txtValorEntrada', prazo: '#txtPrazoMeses',
     simular: '#btnSimular',
   },
-  resultado: {
-    pronto: '#lblValorPrimeiraParcela', prazo: '#lblPrazo', primeiraParcela: '#lblValorPrimeiraParcela', ultimaParcela: '#lblValorUltimaParcela',
-    somatorio: '#lblValorSomatorioParcelas', totalFinanciado: '#colValorTotalFinanciamento', sistema: '#colSistemaAmortizacao',
-    seguradora: '#colSeguradora', linhaCredito: '#colLinhaCredito', taxa: '#colTaxaJurosSimulada', cet: '#colCET', data: '#lblDataSimulacao',
-  },
 } as const;

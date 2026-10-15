@@ -4,7 +4,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWith
 import { getFirestore, doc, setDoc, addDoc, collection, onSnapshot, serverTimestamp }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
-import { opcoes, PRAZO_MIN, PRAZO_MAX } from './opcoes.js';
+import { opcoes, VALOR_MIN_IMOVEL, ENTRADA_MIN_PERCENTUAL, PRAZO_MAX_MESES, PRAZO_MIN_MESES, PRAZO_MIN_MIX_RESIDENCIAL, IDADE_PRAZO_MAX_MESES } from './opcoes.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -22,7 +22,6 @@ for (const [id, lista] of Object.entries({ segmento: opcoes.segmento, estadoCivi
   sel.append(new Option('Selecione', ''));
   lista.forEach((t) => sel.append(new Option(t, t)));
 }
-$('prazo').min = PRAZO_MIN; $('prazo').max = PRAZO_MAX;
 
 // ---------- Máscaras ----------
 const fmtBRL = (centavos) => (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -91,14 +90,27 @@ function maiorDeIdade(iso) {
   return new Date(hoje.getFullYear() - 18, hoje.getMonth(), hoje.getDate()) >= new Date(a, m - 1, d);
 }
 
+const fmtR = (v) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+function mesesDesde(iso) {
+  const [a, m] = iso.split('-').map(Number); const h = new Date();
+  return (h.getFullYear() - a) * 12 + (h.getMonth() + 1 - m);
+}
+
+// Mesmas regras que o simulador do Itaú aplica na tela (o portal valida de novo ao simular).
 function validar(c1, c2, op) {
   if (!cpfValido(c1.cpf)) return 'CPF do comprador principal inválido.';
   if (c2 && !cpfValido(c2.cpf)) return 'CPF do 2º comprador inválido.';
   if (!maiorDeIdade(c1.nascimento) || (c2 && !maiorDeIdade(c2.nascimento))) return 'O comprador deve ter 18 anos ou mais.';
   if (c1.rendaBruta <= 0 || (c2 && c2.rendaBruta <= 0)) return 'Informe a renda bruta mensal.';
-  if (op.valorImovel <= 0) return 'Informe o valor do imóvel.';
-  if (op.entrada >= op.valorImovel) return 'A entrada deve ser menor que o valor do imóvel.';
-  if (!(op.prazoMeses >= PRAZO_MIN && op.prazoMeses <= PRAZO_MAX)) return `O prazo deve ficar entre ${PRAZO_MIN} e ${PRAZO_MAX} meses.`;
+  const minImovel = VALOR_MIN_IMOVEL[op.tipoImovel];
+  if (minImovel && op.valorImovel < minImovel) return `Para imóvel ${op.tipoImovel.toLowerCase()}, o Itaú financia a partir de ${fmtR(minImovel)}.`;
+  const entradaMin = (op.valorImovel * ENTRADA_MIN_PERCENTUAL) / 100;
+  if (op.entrada < entradaMin) return `A entrada deve ser de, no mínimo, ${ENTRADA_MIN_PERCENTUAL}% do valor do imóvel (${fmtR(entradaMin)}). Você pode somar dinheiro e FGTS.`;
+  const mais_velho = c2 && c2.nascimento && c2.nascimento < c1.nascimento ? c2.nascimento : c1.nascimento;
+  const maxPrazo = Math.min(PRAZO_MAX_MESES[op.tipoImovel] ?? 240, IDADE_PRAZO_MAX_MESES - mesesDesde(mais_velho));
+  const minPrazo = op.tipoImovel === 'RESIDENCIAL' && op.sistema === 'MIX' ? PRAZO_MIN_MIX_RESIDENCIAL : PRAZO_MIN_MESES;
+  if (maxPrazo < PRAZO_MIN_MESES) return 'A idade do comprador está fora do prazo de financiamento.';
+  if (!(op.prazoMeses >= minPrazo && op.prazoMeses <= maxPrazo)) return `O prazo deve ficar entre ${minPrazo} e ${maxPrazo} meses (sujeito à análise de crédito).`;
   return null;
 }
 
@@ -144,7 +156,7 @@ const pct = (v) => (v == null ? '—' : v.toLocaleString('pt-BR', { maximumFract
 function renderResultado(p) {
   const el = $('resultado'); el.replaceChildren();
   const par = (t, cls) => { const d = document.createElement('p'); if (cls) d.className = cls; d.textContent = t; el.append(d); };
-  if (p.status === 'erro') return par('Não foi possível concluir a simulação automática. Tente novamente ou fale com o suporte. ' + (p.erro?.mensagemUsuario ?? ''));
+  if (p.status === 'erro') return par(p.erro?.mensagemUsuario ?? 'Não foi possível concluir a simulação automática. Tente novamente ou fale com o suporte.');
   const r = p.resultado;
   const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'Simulação concluída'; el.append(b);
   const linhas = [
@@ -152,12 +164,14 @@ function renderResultado(p) {
     ['Valor da primeira parcela', brl(r.primeiraParcela)],
     ['Valor da última parcela', brl(r.ultimaParcela)],
     ['Somatório das parcelas', brl(r.somatorioParcelas)],
-    ['Valor total do financiamento', brl(r.valorTotalFinanciado)],
+    ['Valor do imóvel', brl(r.valorImovel)],
+    ['Valor da entrada', brl(r.entrada)],
+    ['Valor total do financiamento', brl(r.valorFinanciado)],
     ['Sistema de amortização', r.sistema ?? '—'],
-    ['Seguradora', r.seguradora ?? '—'],
     ['Linha de crédito', r.linhaCredito ?? '—'],
-    ['Taxa de juros simulada', r.taxaJuros ?? '—'],
-    ['Custo Efetivo Total (CET)', r.cet ?? '—'],
+    ['Taxa de juros simulada', r.taxaJurosAnual != null ? pct(r.taxaJurosAnual) + ' a.a.' : '—'],
+    ['Custo Efetivo Total (CET)', r.cetAnual != null ? pct(r.cetAnual) + ' a.a.' : '—'],
+    ['Custo efetivo do seguro (CESH)', r.ceshAnual != null ? pct(r.ceshAnual) + ' a.a.' : '—'],
   ];
   const t = document.createElement('table');
   for (const [k, v] of linhas) { const tr = t.insertRow(); tr.insertCell().textContent = k; tr.insertCell().textContent = v; }

@@ -13,10 +13,13 @@ Esta pasta é independente do restante do repositório (tem `package.json`/`netl
 3. **LGPD.** CPF, renda e nascimento são dados pessoais. Minimize: não logar, não guardar screenshots, definir prazo de retenção
    (ex.: apagar `cliente.*` das propostas após N dias), ter base legal/consentimento do cliente com a imobiliária.
 
-**Campos e seletores do Itaú.** O formulário, o robô (`robot/src/itau/seletores.ts`) e a tela de resultado seguem o HTML real do *Simulador Isolado*
-(arquivo salvo pelo parceiro). O portal **simula**: devolve parcelas, taxa e CET, e não "aprovado/recusado" (a aprovação só vem na análise da proposta).
-Ainda são placeholders: `login` e `menu` (a página salva não os contém) e as listas **tipo de imóvel, seguradora e sistema de amortização**
-(`frontend/opcoes.js`), que o portal carrega por script. Grave-os com `npx playwright codegen <URL>` ou envie prints/HTML dessas telas.
+**Como o portal funciona (copiado do código dele).** O "Simulador Isolado" **simula**: ao clicar em Simular, a página chama
+`POST /api/Simulacao/EnviarSimulacaoModernizadaV2/` e preenche a tela com a resposta (parcelas, taxa, CET, valor liberado). Não existe
+"aprovado/recusado" aí (isso só vem na análise da proposta). O robô dirige a tela como uma pessoa, preenche os campos pelos ids reais,
+**intercepta essa resposta** e a devolve ao site; se o portal recusar por regra (idade, prazo, entrada mínima…), a mensagem dele vai para o corretor.
+Regras do simulador replicadas no formulário (`frontend/opcoes.js`): imóvel mínimo R$ 97.561 (residencial) / R$ 100.000 (comercial),
+entrada mínima 20%, prazo 12–420 meses (residencial) ou 12–240 (comercial), 48 mínimo para MIX residencial, maior de 18 anos.
+Ainda pendentes: o botão e a página de login (`seletores.ts`, hoje placeholder) e a constante de idade/prazo máximo (`prazos.js` do portal, hoje estimada).
 
 ---
 ## Segurança das credenciais do Itaú (vale para as duas opções)

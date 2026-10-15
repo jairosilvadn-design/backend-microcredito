@@ -40,7 +40,7 @@ async function processar(ref: DocumentReference) {
     log.warn({ id: ref.id, codigo: err.codigo, etapa: err.etapa, tentativas, repetir }, 'falha no robô');
     await ref.update(repetir
       ? { status: 'pendente', worker: null }
-      : { status: 'erro', erro: { codigo: err.codigo, etapa: err.etapa ?? null, mensagemUsuario: 'Tente novamente em instantes ou fale com o suporte.' }, concluidoEm: Timestamp.now() });
+      : { status: 'erro', erro: { codigo: err.codigo, etapa: err.etapa ?? null, mensagemUsuario: err.codigo === 'DADOS_INVALIDOS' ? err.message.replace(/^Portal recusou os dados: /, '') : 'Tente novamente em instantes ou fale com o suporte.' }, concluidoEm: Timestamp.now() });
     await ref.collection('historico').add({ status: repetir ? 'pendente' : 'erro', codigo: err.codigo, em: Timestamp.now() });
   }
 }
