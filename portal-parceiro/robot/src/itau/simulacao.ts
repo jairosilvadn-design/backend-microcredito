@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import type { Comprador, DadosSimulacao, ResultadoItau } from '../types.js';
 import { RoboError } from './erros.js';
 import { S } from './seletores.js';
-import { avisoDoPortal, centavos, esperarTelaOuLogin, etapa } from './utils.js';
+import { avisoDoPortal, centavos, esperarTelaOuLogin, etapa, paginaPronta } from './utils.js';
 
 /** Campos com máscara (jquery.mask / maskMoney): digitar tecla a tecla é mais fiel que fill(). */
 const digitar = async (page: Page, sel: string, texto: string) => {
@@ -40,32 +40,42 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
     if (config.ITAU_URL_SIMULADOR) await page.goto(config.ITAU_URL_SIMULADOR, { waitUntil: 'domcontentloaded' });
     else await page.click(S.menu.simuladorIsolado);
     await esperarTelaOuLogin(page, S.form.cpf);
+    await paginaPronta(page);
   });
 
-  await etapa('comprador-principal', async () => {
-    const c = d.cliente;
-    await page.focus(S.form.nome); // o foco dispara o carregamento das listas (tipo de imóvel, seguradora, sistema)
-    await preencherComprador(page, { nome: S.form.nome, cpf: S.form.cpf, nascimento: S.form.nascimento, cep: S.form.cep, renda: S.form.renda, celular: S.form.celular, email: S.form.email }, c);
-    // "Segmento" (#PerfilCliente) fica escondido no portal e não entra na simulação: não é preenchido.
-    await page.selectOption(S.form.estadoCivil, { label: c.estadoCivil });
-    if (c.segundoComprador) {
-      await marcar(page, S.form.somarSim);
-      await preencherComprador(page, S.form.c2, c.segundoComprador);
-    } else await marcar(page, S.form.somarNao);
-  });
+  const preencherTudo = async () => {
+    await etapa('comprador-principal', async () => {
+      const c = d.cliente;
+      await page.focus(S.form.nome); // o foco dispara o carregamento das listas (tipo de imóvel, seguradora, sistema)
+      await preencherComprador(page, { nome: S.form.nome, cpf: S.form.cpf, nascimento: S.form.nascimento, cep: S.form.cep, renda: S.form.renda, celular: S.form.celular, email: S.form.email }, c);
+      // "Segmento" (#PerfilCliente) fica escondido no portal e não entra na simulação: não é preenchido.
+      await page.selectOption(S.form.estadoCivil, { label: c.estadoCivil });
+      if (c.segundoComprador) {
+        await marcar(page, S.form.somarSim);
+        await preencherComprador(page, S.form.c2, c.segundoComprador);
+      } else await marcar(page, S.form.somarNao);
+    });
 
-  await etapa('dados-financiamento', async () => {
-    const o = d.operacao;
-    await marcar(page, S.form.funcionario, d.cliente.funcionarioItau);
-    await page.locator(S.form.tipoImovel).first().selectOption({ label: o.tipoImovel }); // ids repetidos na página: usa o primeiro (formulário ativo) // as listas abaixo só habilitam depois do tipo de imóvel
-    await page.locator(S.form.seguradora).first().selectOption({ label: o.seguradora }); // ids repetidos na página: usa o primeiro (formulário ativo)
-    await page.locator(S.form.sistema).first().selectOption({ label: o.sistema }); // ids repetidos na página: usa o primeiro (formulário ativo)
-    await marcar(page, o.taxa === 'prefixada' ? S.form.taxaPrefixada : S.form.taxaPoupanca);
-    await marcar(page, S.form.financiarItbi, o.financiarItbi);
-    await digitar(page, S.form.valorImovel, centavos(o.valorImovel));
-    await digitar(page, S.form.entrada, centavos(o.entrada));
-    await page.fill(S.form.prazo, String(o.prazoMeses));
-  });
+    await etapa('dados-financiamento', async () => {
+      const o = d.operacao;
+      await marcar(page, S.form.funcionario, d.cliente.funcionarioItau);
+      await page.locator(S.form.tipoImovel).first().selectOption({ label: o.tipoImovel }); // ids repetidos na página: usa o primeiro (formulário ativo) // as listas abaixo só habilitam depois do tipo de imóvel
+      await page.locator(S.form.seguradora).first().selectOption({ label: o.seguradora }); // ids repetidos na página: usa o primeiro (formulário ativo)
+      await page.locator(S.form.sistema).first().selectOption({ label: o.sistema }); // ids repetidos na página: usa o primeiro (formulário ativo)
+      await marcar(page, o.taxa === 'prefixada' ? S.form.taxaPrefixada : S.form.taxaPoupanca);
+      await marcar(page, S.form.financiarItbi, o.financiarItbi);
+      await digitar(page, S.form.valorImovel, centavos(o.valorImovel));
+      await digitar(page, S.form.entrada, centavos(o.entrada));
+      await page.fill(S.form.prazo, String(o.prazoMeses));
+    });
+  };
+  const CAMPOS_OBRIGATORIOS = [S.form.nome, S.form.cpf, S.form.nascimento, S.form.cep, S.form.renda, S.form.celular, S.form.email, S.form.valorImovel, S.form.entrada, S.form.prazo];
+  const camposVazios = () => page.evaluate((ids) => ids.filter((id) => !(document.querySelector(id) as HTMLInputElement | null)?.value), CAMPOS_OBRIGATORIOS as unknown as string[]);
+  await preencherTudo();
+  // Confere se o portal não apagou nada durante o preenchimento; se apagou, preenche de novo (uma vez).
+  let vazios = await camposVazios();
+  if (vazios.length) { await preencherTudo(); vazios = await camposVazios(); }
+  if (vazios.length) throw new RoboError('ERRO_INESPERADO', 'O portal apagou campos durante o preenchimento', true, 'conferir-campos', vazios.join(', '));
 
   return etapa('simular-e-ler', async () => {
     const ESPERA_RESPOSTA = Math.max(config.ROBO_TIMEOUT_MS * 3, 90_000); // o cálculo do banco pode demorar bem mais que um clique

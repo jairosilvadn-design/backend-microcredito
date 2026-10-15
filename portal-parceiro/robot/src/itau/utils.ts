@@ -61,3 +61,10 @@ export async function esperarTelaOuLogin(page: Page, seletorTela: string) {
   const vencedor = await Promise.race([pTela, pLogin]);
   if (vencedor === 'login') throw new RoboError('SESSAO_EXPIRADA', 'Sessão do portal expirada', false, 'sessao');
 }
+
+/** A página do Itaú roda um código de inicialização que ZERA alguns campos (ex.: nome/CPF). Esperamos ele terminar antes de preencher. */
+export async function paginaPronta(page: Page) {
+  await page.waitForLoadState('load').catch(() => undefined);
+  await page.waitForFunction(() => { const j = (window as unknown as { jQuery?: { isReady?: boolean } }).jQuery; return j ? j.isReady === true : true; }, undefined, { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForTimeout(500); // deixa terminar os handlers assíncronos do "ready"
+}

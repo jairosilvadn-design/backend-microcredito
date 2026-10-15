@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import type { DadosProposta, PessoaProposta, ResultadoProposta } from '../types.js';
 import { RoboError } from './erros.js';
 import { S } from './seletores.js';
-import { avisoDoPortal, centavos, esperarTelaOuLogin, etapa } from './utils.js';
+import { avisoDoPortal, centavos, esperarTelaOuLogin, etapa, paginaPronta } from './utils.js';
 
 const P = S.proposta;
 const digitar = async (page: Page, sel: string, texto: string) => {
@@ -72,7 +72,7 @@ async function preencher(page: Page, d: DadosProposta) {
 export async function enviarProposta(page: Page, d: DadosProposta, consentimentoScrRegistrado: boolean): Promise<ResultadoProposta> {
   await etapa('abrir-proposta', async () => {
     if (!config.ITAU_URL_PROPOSTA) throw new RoboError('DADOS_INVALIDOS', 'ITAU_URL_PROPOSTA não configurada no robô', false, 'abrir-proposta');
-    await page.goto(config.ITAU_URL_PROPOSTA, { waitUntil: 'domcontentloaded' }); await esperarTelaOuLogin(page, P.tipoImovel);
+    await page.goto(config.ITAU_URL_PROPOSTA, { waitUntil: 'domcontentloaded' }); await esperarTelaOuLogin(page, P.tipoImovel); await paginaPronta(page);
   });
   await preencher(page, d);
 
