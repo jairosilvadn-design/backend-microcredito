@@ -152,6 +152,8 @@ function validar(c1, c2, op) {
   if (minImovel && op.valorImovel < minImovel) return `Para imóvel ${op.tipoImovel.toLowerCase()}, o Itaú financia a partir de ${fmtR(minImovel)}.`;
   const entradaMin = (op.valorImovel * ENTRADA_MIN_PERCENTUAL) / 100;
   if (op.entrada < entradaMin) return `A entrada deve ser de, no mínimo, ${ENTRADA_MIN_PERCENTUAL}% do valor do imóvel (${fmtR(entradaMin)}). Você pode somar dinheiro e FGTS.`;
+  // Com ITBI/cartório financiado, financiamento + ITBI (5% do imóvel) não pode chegar ao limite de 80% => entrada acima de 25% (regra do portal).
+  if (op.financiarItbi && op.entrada <= op.valorImovel * 0.25) return `Para financiar o ITBI e os custos de cartório, a entrada precisa ser maior que 25% do valor do imóvel (${fmtR(op.valorImovel * 0.25)}). Aumente a entrada ou desmarque "Financiar ITBI".`;
   const mais_velho = c2 && c2.nascimento && c2.nascimento < c1.nascimento ? c2.nascimento : c1.nascimento;
   const maxPrazo = Math.min(PRAZO_MAX_MESES[op.tipoImovel] ?? 240, IDADE_PRAZO_MAX_MESES - mesesDesde(mais_velho));
   const minPrazo = op.tipoImovel === 'RESIDENCIAL' && op.sistema === 'MIX' ? PRAZO_MIN_MIX_RESIDENCIAL : PRAZO_MIN_MESES;

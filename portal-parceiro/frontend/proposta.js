@@ -141,6 +141,7 @@ export function iniciarProposta({ auth, db, getClaims, mostrar, carregando, perf
     const fi = d.financiamento; const min = VALOR_MIN_IMOVEL_PROPOSTA[fi.tipoImovel];
     if (min && fi.valorImovel < min) return `O Itaú financia imóvel ${fi.tipoImovel === 'RESIDENTIAL' ? 'residencial' : 'comercial'} a partir de ${brl(min)}.`;
     if (fi.entrada < (fi.valorImovel * ENTRADA_MIN_PERCENTUAL) / 100) return `A entrada deve ser de, no mínimo, ${ENTRADA_MIN_PERCENTUAL}% do valor do imóvel.`;
+    if (fi.financiarItbi && fi.entrada <= fi.valorImovel * 0.25) return `Para financiar o ITBI e os custos de cartório, a entrada precisa ser maior que 25% do valor do imóvel (${brl(fi.valorImovel * 0.25)}). Aumente a entrada ou desmarque "Financiar ITBI".`;
     const velho = [d.principal.nascimento, d.segundo?.nascimento].filter(Boolean).sort()[0];
     const maxPrazo = Math.min(PRAZO_MAX_MESES[fi.tipoImovel === 'RESIDENTIAL' ? 'RESIDENCIAL' : 'COMERCIAL'], IDADE_PRAZO_MAX_MESES - mesesDesde(velho));
     const minPrazo = fi.tipoImovel === 'RESIDENTIAL' && fi.sistema === 'HYBRID' ? 48 : PRAZO_MIN_MESES;
