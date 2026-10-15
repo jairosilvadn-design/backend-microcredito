@@ -28,7 +28,7 @@ export async function etapa<T>(nome: string, fn: () => Promise<T>): Promise<T> {
     if (/Timeout|timeout/.test(msg)) throw new RoboError('TIMEOUT', `Tempo esgotado na etapa "${nome}"`, true, nome, detalhe);
     if (/waiting for (locator|selector)|strict mode violation/.test(msg)) throw new RoboError('SELETOR_NAO_ENCONTRADO', `Elemento não encontrado na etapa "${nome}"`, false, nome, detalhe);
     if (/net::|ECONN|ERR_/.test(msg)) throw new RoboError('PORTAL_INDISPONIVEL', `Portal indisponível na etapa "${nome}"`, true, nome, detalhe);
-    throw e;
+    throw new RoboError('ERRO_INESPERADO', `Falha inesperada na etapa "${nome}"`, false, nome, `${msg.split('\n')[0].slice(0, 220)} ${await retratoDaTela()}`.trim());
   }
 }
 
@@ -55,9 +55,9 @@ export async function textoOuNull(page: Page, sel: string) {
 
 /** Espera a tela desejada. Se aparecer a tela de login no lugar, a sessão salva venceu (ou foi derrubada): sinaliza para refazer o login. */
 export async function esperarTelaOuLogin(page: Page, seletorTela: string) {
-  const vencedor = await Promise.race([
-    page.waitForSelector(seletorTela, { state: 'attached' }).then(() => 'tela' as const),
-    page.waitForSelector('#txtUsuario', { state: 'visible' }).then(() => 'login' as const),
-  ]);
+  const pTela = page.waitForSelector(seletorTela, { state: 'attached' }).then(() => 'tela' as const);
+  const pLogin = page.waitForSelector('#txtUsuario', { state: 'visible' }).then(() => 'login' as const);
+  pTela.catch(() => undefined); pLogin.catch(() => undefined); // a que perder a corrida será cancelada ao fechar a página
+  const vencedor = await Promise.race([pTela, pLogin]);
   if (vencedor === 'login') throw new RoboError('SESSAO_EXPIRADA', 'Sessão do portal expirada', false, 'sessao');
 }

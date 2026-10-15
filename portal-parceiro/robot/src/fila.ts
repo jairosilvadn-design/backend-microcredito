@@ -47,11 +47,11 @@ async function processar(ref: DocumentReference) {
     await ref.collection('historico').add({ status: 'simulado', em: Timestamp.now(), ms: Date.now() - t0 });
     log.info({ id: ref.id, status: resultado.status, ms: Date.now() - t0 }, 'simulação concluída');
   } catch (e) {
-    const err = e instanceof RoboError ? e : new RoboError('PORTAL_INDISPONIVEL', e instanceof Error ? e.message : 'erro desconhecido', true);
+    const err = e instanceof RoboError ? e : new RoboError('ERRO_INESPERADO', 'Falha inesperada no robô', false, undefined, (e instanceof Error ? `${e.name}: ${e.message}` : String(e)).split('\n')[0].slice(0, 300));
     const tentativas = ((await ref.get()).data()?.tentativas as number) ?? 1;
     // Proposta NUNCA volta para a fila sozinha: repetir poderia criar proposta duplicada no banco.
     const repetir = job.tipo === 'simulacao' && err.retentavel && tentativas < config.ROBO_MAX_TENTATIVAS;
-    log.warn(`falha no robô: tipo=${job.tipo} codigo=${err.codigo} etapa=${err.etapa ?? '-'} tentativas=${tentativas} repetir=${repetir} detalhe=${err.detalhe ?? '-'}`);
+    log.warn(`falha no robô: tipo=${job.tipo} codigo=${err.codigo} etapa=${err.etapa ?? '-'} tentativas=${tentativas} repetir=${repetir} mensagem=${err.message} detalhe=${err.detalhe ?? '-'}`);
     const msgUsuario = err.codigo === 'DADOS_INVALIDOS' ? err.message.replace(/^Portal recusou (os dados|a proposta): /, '')
       : err.codigo === 'ENVIO_INCERTO' ? err.message
       : err.codigo === 'ACAO_HUMANA' ? 'O envio está bloqueado por uma pendência na conta do correspondente. Avise o administrador.'
