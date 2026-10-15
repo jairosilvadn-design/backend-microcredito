@@ -1,9 +1,9 @@
 // IDs do formulário e do resultado extraídos do "Simulador Isolado" salvo pelo usuário (HTML real do portal) — confiáveis.
-// ⚠️ AINDA PLACEHOLDER: o botão de entrar do login e o `menu` (a página salva não contém a tela de login nem o menu).
+// ⚠️ AINDA PLACEHOLDER: só o `menu` (a página salva não o contém). Com ITAU_URL_SIMULADOR definido o robô nem usa o menu.
 // Grave-os com `npx playwright codegen <URL>` ou me envie prints/HTML da tela de login e do menu.
 export const S = {
-  // Login: página /Portal/ (form #loginForm, campos username/password — vistos em util.js). O botão ainda é PLACEHOLDER.
-  login: { usuario: '#loginForm input[name=username]', senha: '#loginForm input[name=password]', entrar: '#loginForm button[type=submit]' },
+  // Login (página /Portal/, copiada do HTML real). O usuário é o E-MAIL cadastrado no portal.
+  login: { usuario: '#txtUsuario', senha: '#txtSenha', entrar: '#btnEntrar' },
   menu: { simuladorIsolado: 'text=Simulador Isolado' },                                                                            // PLACEHOLDER
   form: {
     nome: '#txtNome', cpf: '#txtCPFPrincipal', nascimento: '#txtDataNascimentoPrimario', cep: '#txtCepPrincipal',

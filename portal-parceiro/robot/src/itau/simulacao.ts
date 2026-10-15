@@ -95,6 +95,12 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
       taxaJurosAnual: n(Number(j.annualRate)),
       cetAnual: n(j.cetAnnual),
       ceshAnual: n(j.ceshAnnual),
+      iof: n(j.iof?.value),
+      tarifaAdministracaoMensal: n(j.firstInstallment?.tac),
+      seguroMip: n(j.firstInstallment?.insurerMip),
+      seguroDfi: n(j.firstInstallment?.insurerDfi),
+      valorTotalDevido: n(j.firstInstallment?.beginningBalance),
+      tarifaAvaliacao: n(j.evaluationFee),
     } satisfies ResultadoItau;
   });
 }

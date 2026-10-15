@@ -27,4 +27,10 @@ export interface ResultadoItau {
   taxaJurosAnual: number | null;
   cetAnual: number | null;
   ceshAnual: number | null;
+  iof: number | null;
+  tarifaAdministracaoMensal: number | null;
+  seguroMip: number | null;
+  seguroDfi: number | null;
+  valorTotalDevido: number | null;
+  tarifaAvaliacao: number | null;
 }

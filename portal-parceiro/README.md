@@ -21,6 +21,9 @@ Regras do simulador replicadas no formulário (`frontend/opcoes.js`): imóvel m�
 entrada mínima 20%, prazo 12–420 meses (residencial) ou 12–240 (comercial), 48 mínimo para MIX residencial, maior de 18 anos.
 Ainda pendentes: o botão e a página de login (`seletores.ts`, hoje placeholder) e a constante de idade/prazo máximo (`prazos.js` do portal, hoje estimada).
 
+**Identidade visual.** O layout, os campos, os textos e o fluxo seguem o simulador do Itaú, mas a marca é a do parceiro: nome, cores,
+iniciais/logotipo e rodapé ficam em `frontend/marca.js` ("Portal da Imobiliária" por padrão). Usar nome, logotipo ou cores do Itaú só com autorização escrita do banco.
+
 ---
 ## Segurança das credenciais do Itaú (vale para as duas opções)
 - Existem **apenas como variáveis de ambiente do servidor que roda o robô** (`ITAU_USUARIO`, `ITAU_SENHA`). Nunca vão para o GitHub,

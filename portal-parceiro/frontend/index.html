@@ -2,113 +2,131 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Portal do Parceiro — Crédito Imobiliário</title>
-  <style>
-    body{font:16px system-ui;margin:0;background:#f4f5f7;color:#1b1f24}
-    main{max-width:720px;margin:0 auto;padding:16px}
-    section{background:#fff;border-radius:12px;padding:20px;margin:16px 0;box-shadow:0 1px 3px #0002}
-    h3{margin:22px 0 4px;font-size:16px;border-bottom:1px solid #e3e3e3;padding-bottom:4px}
-    label{display:block;margin:10px 0 4px;font-size:14px}
-    input,select,button{width:100%;box-sizing:border-box;padding:10px;font-size:16px;border:1px solid #bbb;border-radius:8px}
-    input[type=radio],input[type=checkbox]{width:auto;margin-right:6px}
-    .inline label{display:inline-block;margin-right:18px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
-    @media(max-width:560px){.grid{grid-template-columns:1fr}}
-    button{background:#ec7000;color:#fff;border:0;margin-top:16px;cursor:pointer}
-    button:disabled{opacity:.6;cursor:wait}
-    .hidden{display:none}.erro{color:#b00020}
-    .badge{display:inline-block;padding:4px 10px;border-radius:99px;font-weight:600;background:#d9f5e3}
-    table{width:100%;border-collapse:collapse;margin-top:10px}
-    td{padding:8px 4px;border-bottom:1px solid #eee;font-size:15px}td:last-child{text-align:right;font-weight:600}
-    .aviso{font-size:13px;color:#555;margin-top:12px}
-  </style>
+  <title>Portal da Imobiliária</title>
+  <link rel="stylesheet" href="estilo.css">
 </head>
-<body><main>
-  <h1>Portal do Parceiro</h1>
+<body>
+  <div id="carregando" class="carregando hidden" role="status"><div><div class="spin"></div><span id="carregando-txt">Simulando no banco… pode levar até 1–2 min</span></div></div>
 
-  <section id="tela-login">
-    <h2 id="titulo-auth">Entrar</h2>
-    <form id="form-auth">
-      <div id="campos-cadastro" class="hidden">
-        <label>Nome da imobiliária <input id="nome"></label>
-        <label>CNPJ <input id="cnpj" inputmode="numeric"></label>
-      </div>
-      <label>E-mail <input id="email" type="email" required></label>
-      <label>Senha <input id="senha" type="password" minlength="8" required></label>
-      <button>Continuar</button>
-      <p><a href="#" id="alternar">Quero me cadastrar</a></p>
-      <p id="msg-auth" class="erro"></p>
-    </form>
-  </section>
-
-  <section id="tela-pendente" class="hidden">
-    <h2>Cadastro em análise</h2>
-    <p>Seu acesso será liberado após a aprovação do administrador.</p>
-    <button id="sair1">Sair</button>
-  </section>
-
-  <section id="tela-simulacao" class="hidden">
-    <h2>Simulador de financiamento imobiliário</h2>
-    <form id="form-sim">
-      <h3>Dados do comprador principal</h3>
-      <div class="grid">
-        <label>Nome completo* <input id="c1-nome" required></label>
-        <label>CPF* <input id="c1-cpf" data-cpf inputmode="numeric" maxlength="14" placeholder="000.000.000-00" required></label>
-        <label>Data de nascimento* <input id="c1-nasc" type="date" required></label>
-        <label>CEP de residência* <input id="c1-cep" data-cep inputmode="numeric" maxlength="9" placeholder="00000-000" required></label>
-        <label>Renda bruta total mensal* <input id="c1-renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
-        <label>Celular* <input id="c1-cel" data-cel inputmode="numeric" maxlength="15" placeholder="(99) 99999-9999" required></label>
-        <label>E-mail* <input id="c1-email" type="email" required></label>
-        <label>Segmento* <select id="segmento" required></select></label>
-        <label>Estado civil* <select id="estadoCivil" required></select></label>
-      </div>
-      <label>Somar renda com a de outro comprador?*</label>
-      <div class="inline">
-        <label><input type="radio" name="somar" value="sim"> Sim</label>
-        <label><input type="radio" name="somar" value="nao" checked> Não</label>
-      </div>
-
-      <div id="bloco-c2" class="hidden">
-        <h3>Dados do 2º comprador</h3>
-        <div class="grid">
-          <label>Nome completo* <input id="c2-nome"></label>
-          <label>CPF* <input id="c2-cpf" data-cpf inputmode="numeric" maxlength="14" placeholder="000.000.000-00"></label>
-          <label>Data de nascimento* <input id="c2-nasc" type="date"></label>
-          <label>CEP de residência* <input id="c2-cep" data-cep inputmode="numeric" maxlength="9" placeholder="00000-000"></label>
-          <label>Renda bruta total mensal* <input id="c2-renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off"></label>
-          <label>Celular* <input id="c2-cel" data-cel inputmode="numeric" maxlength="15" placeholder="(99) 99999-9999"></label>
-          <label>E-mail* <input id="c2-email" type="email"></label>
+  <!-- LOGIN / CADASTRO -->
+  <div id="tela-login">
+    <div class="login-box">
+      <h1>Plataforma digital</h1><h2 data-marca="nome">Portal da Imobiliária</h2>
+      <hr>
+      <form id="form-auth">
+        <div id="campos-cadastro" class="hidden">
+          <label for="nome">Nome da imobiliária</label><input id="nome">
+          <label for="cnpj">CNPJ</label><input id="cnpj" inputmode="numeric" maxlength="18">
         </div>
+        <label for="email">E-mail</label><input id="email" type="email" required autocomplete="username">
+        <label for="senha">Senha</label><input id="senha" type="password" minlength="8" required autocomplete="current-password">
+        <button id="btn-entrar">Entrar</button>
+        <p><a href="#" id="esqueci">Esqueceu sua senha?</a></p>
+        <p><a href="#" id="alternar">Quero me cadastrar</a> · <a href="#" id="ajuda" class="hidden" target="_blank" rel="noopener">Precisa de ajuda?</a></p>
+        <p id="msg-auth" class="erro"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ÁREA LOGADA -->
+  <div id="app" class="hidden">
+    <header>
+      <div class="banner"><span class="logo" data-marca="iniciais">PI</span><span data-marca="nome">Portal da Imobiliária</span></div>
+      <nav>
+        <button id="nav-sim" class="ativo">Simulador</button>
+        <button id="nav-hist">Minhas simulações</button>
+      </nav>
+      <div class="user"><span id="user-nome"></span><button class="btn-sair" id="sair">Sair</button></div>
+    </header>
+
+    <main>
+      <!-- Aguardando aprovação -->
+      <section id="tela-pendente" class="card hidden">
+        <h2 class="sec">Cadastro em análise</h2>
+        <p>Seu acesso será liberado após a aprovação do administrador.</p>
+      </section>
+
+      <!-- SIMULADOR -->
+      <div id="tela-simulacao" class="hidden">
+        <div class="migalha"><b>Home</b> › Simulador</div>
+        <h1 class="titulo">Simulador de financiamento</h1>
+        <p class="sub">Simule as condições do financiamento.</p>
+
+        <form id="form-sim" class="card">
+          <h2 class="sec">Dados iniciais</h2>
+          <h3 class="sec">Dados do comprador principal</h3>
+          <div class="grid">
+            <div><label class="l" for="c1-nome">Nome completo*</label><input id="c1-nome" required></div>
+            <div><label class="l" for="c1-cpf">CPF principal*</label><input id="c1-cpf" data-cpf inputmode="numeric" maxlength="14" placeholder="___.___.___-__" required></div>
+            <div><label class="l" for="c1-nasc">Data de nascimento*</label><input id="c1-nasc" type="date" required></div>
+            <div><label class="l" for="c1-cep">CEP de residência*</label><input id="c1-cep" data-cep inputmode="numeric" maxlength="9" placeholder="00000-000" required></div>
+            <div><label class="l" for="c1-renda">Renda bruta total mensal*</label><input id="c1-renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></div>
+            <div><label class="l" for="c1-cel">Celular*</label><input id="c1-cel" data-cel inputmode="numeric" maxlength="15" placeholder="(99) 99999-9999" required></div>
+            <div><label class="l" for="c1-email">E-mail*</label><input id="c1-email" type="email" required></div>
+            <div><label class="l" for="segmento">Segmento*</label><select id="segmento" required></select></div>
+            <div><label class="l" for="estadoCivil">Estado civil*</label><select id="estadoCivil" required></select></div>
+          </div>
+          <label class="l">Somar renda com a de outro comprador?*</label>
+          <div class="inline">
+            <label><input type="radio" name="somar" value="sim"> Sim</label>
+            <label><input type="radio" name="somar" value="nao" checked> Não</label>
+          </div>
+
+          <div id="bloco-c2" class="hidden">
+            <h3 class="sec">Dados do 2º comprador</h3>
+            <div class="grid">
+              <div><label class="l" for="c2-nome">Nome completo*</label><input id="c2-nome"></div>
+              <div><label class="l" for="c2-cpf">CPF*</label><input id="c2-cpf" data-cpf inputmode="numeric" maxlength="14" placeholder="___.___.___-__"></div>
+              <div><label class="l" for="c2-nasc">Data de nascimento*</label><input id="c2-nasc" type="date"></div>
+              <div><label class="l" for="c2-cep">CEP de residência*</label><input id="c2-cep" data-cep inputmode="numeric" maxlength="9" placeholder="00000-000"></div>
+              <div><label class="l" for="c2-renda">Renda bruta total mensal*</label><input id="c2-renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off"></div>
+              <div><label class="l" for="c2-cel">Celular*</label><input id="c2-cel" data-cel inputmode="numeric" maxlength="15" placeholder="(99) 99999-9999"></div>
+              <div><label class="l" for="c2-email">E-mail*</label><input id="c2-email" type="email"></div>
+            </div>
+          </div>
+
+          <h2 class="sec" style="margin-top:26px">Dados do financiamento</h2>
+          <label class="l"><input type="checkbox" id="funcionario"> É funcionário do banco?</label>
+          <h3 class="sec">Dados do imóvel</h3>
+          <div class="grid">
+            <div><label class="l" for="tipoImovel">Tipo de imóvel*</label><select id="tipoImovel" required></select></div>
+            <div><label class="l" for="seguradora">Seguradora*</label><select id="seguradora" required></select></div>
+            <div><label class="l" for="sistema">Sistema de amortização*</label><select id="sistema" required></select></div>
+          </div>
+          <h3 class="sec">Custos adicionais</h3>
+          <label class="l"><input type="checkbox" id="financiarItbi"> Financiar ITBI e custos com o cartório</label>
+          <h3 class="sec">Taxa do financiamento</h3>
+          <div class="inline">
+            <label><input type="radio" name="taxa" value="prefixada" checked> Taxa pré-fixada</label>
+            <label><input type="radio" name="taxa" value="poupanca"> Taxa poupança</label>
+          </div>
+          <div class="grid" style="margin-top:6px">
+            <div><label class="l" for="imovel">Valor do imóvel (R$)*</label><input id="imovel" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></div>
+            <div><label class="l" for="entrada">Valor da entrada (R$)*</label><input id="entrada" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></div>
+            <div><label class="l" for="prazo">Prazo (meses)*</label><input id="prazo" type="number" inputmode="numeric" required></div>
+          </div>
+          <p class="aviso">Dinheiro e FGTS podem compor a entrada.</p>
+          <div class="total">Valor total financiado: <span id="total-fin">R$ 0,00</span></div>
+          <div class="acoes"><button class="btn" id="enviar">Simular</button></div>
+          <p id="msg-sim" class="erro"></p>
+        </form>
       </div>
 
-      <h3>Dados do financiamento</h3>
-      <label><input type="checkbox" id="funcionario"> É funcionário Itaú?</label>
-      <div class="grid">
-        <label>Tipo de imóvel* <select id="tipoImovel" required></select></label>
-        <label>Seguradora* <select id="seguradora" required></select></label>
-        <label>Sistema de amortização* <select id="sistema" required></select></label>
-        <label>Prazo (meses)* <input id="prazo" type="number" inputmode="numeric" required></label>
-        <label>Valor do imóvel* <input id="imovel" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
-        <label>Valor da entrada* <input id="entrada" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
+      <!-- RESULTADO -->
+      <div id="tela-resultado" class="hidden" aria-live="polite">
+        <div class="migalha"><b>Home</b> › Simulador › Resultado</div>
+        <h1 class="titulo">Resultado da simulação</h1>
+        <div id="resultado"></div>
       </div>
-      <label>Taxa do financiamento*</label>
-      <div class="inline">
-        <label><input type="radio" name="taxa" value="prefixada" checked> Taxa pré-fixada</label>
-        <label><input type="radio" name="taxa" value="poupanca"> Taxa poupança</label>
+
+      <!-- HISTÓRICO -->
+      <div id="tela-historico" class="hidden">
+        <div class="migalha"><b>Home</b> › Minhas simulações</div>
+        <h1 class="titulo" id="hist-titulo">Minhas simulações</h1>
+        <section class="card"><div id="hist-corpo">Carregando…</div></section>
       </div>
-      <label><input type="checkbox" id="financiarItbi"> Financiar ITBI e cartório</label>
-
-      <button id="enviar">Simular</button>
-      <p id="msg-sim" class="erro"></p>
-    </form>
-    <p><a href="#" id="sair2">Sair</a></p>
-  </section>
-
-  <section id="tela-resultado" class="hidden" aria-live="polite">
-    <h2>Resultado da simulação</h2>
-    <div id="resultado"></div>
-    <button id="nova">Nova simulação</button>
-  </section>
-</main>
+    </main>
+    <footer id="rodape"></footer>
+  </div>
 <script type="module" src="app.js"></script>
 </body></html>

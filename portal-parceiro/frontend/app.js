@@ -1,20 +1,38 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut }
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, doc, setDoc, addDoc, collection, onSnapshot, serverTimestamp }
+import { getFirestore, doc, setDoc, addDoc, collection, onSnapshot, serverTimestamp, query, where, orderBy, limit, getDocs }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
+import { marca } from './marca.js';
 import { opcoes, VALOR_MIN_IMOVEL, ENTRADA_MIN_PERCENTUAL, PRAZO_MAX_MESES, PRAZO_MIN_MESES, PRAZO_MIN_MIX_RESIDENCIAL, IDADE_PRAZO_MAX_MESES } from './opcoes.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const $ = (id) => document.getElementById(id);
-const telas = ['tela-login', 'tela-pendente', 'tela-simulacao', 'tela-resultado'];
-const mostrar = (t) => telas.forEach((x) => $(x).classList.toggle('hidden', x !== t));
+const secoes = ['tela-pendente', 'tela-simulacao', 'tela-resultado', 'tela-historico'];
+const mostrar = (t) => {
+  const logado = t !== 'login';
+  $('tela-login').classList.toggle('hidden', logado);
+  $('app').classList.toggle('hidden', !logado);
+  secoes.forEach((x) => $(x).classList.toggle('hidden', x !== t));
+  $('nav-sim').classList.toggle('ativo', t === 'tela-simulacao' || t === 'tela-resultado');
+  $('nav-hist').classList.toggle('ativo', t === 'tela-historico');
+  window.scrollTo(0, 0);
+};
+const carregando = (on, txt) => { $('carregando').classList.toggle('hidden', !on); if (txt) $('carregando-txt').textContent = txt; };
+// Identidade visual (marca.js)
+document.documentElement.style.setProperty('--cor', marca.cor);
+document.documentElement.style.setProperty('--cor-clara', marca.corClara);
+document.title = marca.nome;
+document.querySelectorAll('[data-marca]').forEach((el) => { el.textContent = marca[el.dataset.marca]; });
+$('rodape').textContent = marca.rodape;
+if (marca.ajudaUrl) { $('ajuda').href = marca.ajudaUrl; $('ajuda').classList.remove('hidden'); }
 const soDigitos = (s) => (s ?? '').replace(/\D/g, '');
 let cadastro = false;
 let unsubProposta = null;
+let claimsAtuais = {};
 
 // ---------- Listas de seleção ----------
 for (const [id, lista] of Object.entries({ segmento: opcoes.segmento, estadoCivil: opcoes.estadoCivil, tipoImovel: opcoes.tipoImovel, seguradora: opcoes.seguradora, sistema: opcoes.sistema })) {
@@ -37,6 +55,9 @@ function cpfValido(cpf) {
   const dv = (n) => { let s = 0; for (let i = 0; i < n; i++) s += Number(cpf[i]) * (n + 1 - i); const r = (s * 10) % 11; return r === 10 ? 0 : r; };
   return dv(9) === Number(cpf[9]) && dv(10) === Number(cpf[10]);
 }
+
+const atualizaTotal = () => { $('total-fin').textContent = fmtBRL(Math.max(0, Math.round((valor('imovel') - valor('entrada')) * 100))); };
+['imovel', 'entrada'].forEach((id) => $(id).addEventListener('input', atualizaTotal));
 
 // ---------- Login / cadastro ----------
 $('alternar').onclick = (e) => {
@@ -61,15 +82,28 @@ $('form-auth').onsubmit = async (e) => {
   } catch (err) { $('msg-auth').textContent = 'Não foi possível entrar/cadastrar: ' + err.code; }
 };
 
-for (const id of ['sair1', 'sair2']) $(id).onclick = (e) => { e.preventDefault(); signOut(auth); };
+$('sair').onclick = () => signOut(auth);
+$('esqueci').onclick = async (e) => {
+  e.preventDefault();
+  if (!$('email').value) return ($('msg-auth').textContent = 'Digite seu e-mail e clique de novo em "Esqueceu sua senha?".');
+  try { await sendPasswordResetEmail(auth, $('email').value); $('msg-auth').textContent = 'Enviamos um link para redefinir a senha, se o e-mail existir.'; }
+  catch { $('msg-auth').textContent = 'Não foi possível enviar o e-mail agora.'; }
+};
 
 // Papel e aprovação vêm das custom claims do token (definidas só pelo admin).
 onAuthStateChanged(auth, async (user) => {
   if (unsubProposta) { unsubProposta(); unsubProposta = null; }
-  if (!user) return mostrar('tela-login');
+  carregando(false);
+  if (!user) return mostrar('login');
   const { claims } = await user.getIdTokenResult(true);
-  mostrar(claims.aprovado ? 'tela-simulacao' : 'tela-pendente');
+  claimsAtuais = claims;
+  $('user-nome').textContent = user.email;
+  const ok = !!claims.aprovado;
+  $('nav-sim').classList.toggle('hidden', !ok); $('nav-hist').classList.toggle('hidden', !ok);
+  mostrar(ok ? 'tela-simulacao' : 'tela-pendente');
 });
+$('nav-sim').onclick = () => mostrar('tela-simulacao');
+$('nav-hist').onclick = () => carregarHistorico();
 
 // ---------- Formulário ----------
 const somar = () => document.querySelector('input[name=somar]:checked').value === 'sim';
@@ -126,7 +160,7 @@ $('form-sim').onsubmit = async (e) => {
   const erro = validar(c1, c2, op);
   if (erro) return ($('msg-sim').textContent = erro);
 
-  btn.disabled = true; btn.textContent = 'Simulando no banco… (pode levar até 1–2 min)';
+  btn.disabled = true; carregando(true, 'Simulando no banco… pode levar até 1–2 min');
   try {
     const { claims } = await auth.currentUser.getIdTokenResult();
     const ref = await addDoc(collection(db, 'propostas'), {
@@ -140,42 +174,99 @@ $('form-sim').onsubmit = async (e) => {
     unsubProposta = onSnapshot(ref, (snap) => {
       const p = snap.data();
       if (!p || ['pendente', 'processando'].includes(p.status)) return;
+      btn.disabled = false;
       renderResultado(p); mostrar('tela-resultado');
-      btn.disabled = false; btn.textContent = 'Simular';
+      carregando(false);
       unsubProposta?.();
     });
   } catch (err) {
     $('msg-sim').textContent = 'Erro ao enviar: ' + err.code;
-    btn.disabled = false; btn.textContent = 'Simular';
+    carregando(false);
   }
 };
 
 // ---------- Resultado (campos da simulação do portal) ----------
 const brl = (v) => (v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
-const pct = (v) => (v == null ? '—' : v.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + '%');
-function renderResultado(p) {
-  const el = $('resultado'); el.replaceChildren();
-  const par = (t, cls) => { const d = document.createElement('p'); if (cls) d.className = cls; d.textContent = t; el.append(d); };
-  if (p.status === 'erro') return par(p.erro?.mensagemUsuario ?? 'Não foi possível concluir a simulação automática. Tente novamente ou fale com o suporte.');
-  const r = p.resultado;
-  const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'Simulação concluída'; el.append(b);
-  const linhas = [
-    ['Prazo do financiamento', r.prazoMeses != null ? r.prazoMeses + ' meses' : '—'],
-    ['Valor da primeira parcela', brl(r.primeiraParcela)],
-    ['Valor da última parcela', brl(r.ultimaParcela)],
-    ['Somatório das parcelas', brl(r.somatorioParcelas)],
-    ['Valor do imóvel', brl(r.valorImovel)],
-    ['Valor da entrada', brl(r.entrada)],
-    ['Valor total do financiamento', brl(r.valorFinanciado)],
-    ['Sistema de amortização', r.sistema ?? '—'],
-    ['Linha de crédito', r.linhaCredito ?? '—'],
-    ['Taxa de juros simulada', r.taxaJurosAnual != null ? pct(r.taxaJurosAnual) + ' a.a.' : '—'],
-    ['Custo Efetivo Total (CET)', r.cetAnual != null ? pct(r.cetAnual) + ' a.a.' : '—'],
-    ['Custo efetivo do seguro (CESH)', r.ceshAnual != null ? pct(r.ceshAnual) + ' a.a.' : '—'],
-  ];
-  const t = document.createElement('table');
+const pct = (v) => (v == null ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '% a.a.');
+const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+function tabela(linhas) {
+  const t = el('table', 'det');
   for (const [k, v] of linhas) { const tr = t.insertRow(); tr.insertCell().textContent = k; tr.insertCell().textContent = v; }
-  el.append(t);
-  par('Isto é apenas uma simulação. A efetivação está condicionada à análise da proposta de financiamento. A taxa apresentada é apenas para referência.', 'aviso');
+  return t;
 }
-$('nova').onclick = () => { $('form-sim').reset(); $('bloco-c2').classList.add('hidden'); mostrar('tela-simulacao'); };
+
+function renderResultado(p) {
+  const box = $('resultado'); box.replaceChildren();
+  if (p.status === 'erro') {
+    const c = el('section', 'card'); c.append(el('h2', 'sec', 'Não foi possível simular'), el('p', 'erro', p.erro?.mensagemUsuario ?? 'Tente novamente ou fale com o suporte.'));
+    const a = el('div', 'acoes'); const b = el('button', 'btn', 'Voltar e ajustar'); b.onclick = () => mostrar('tela-simulacao'); a.append(b); c.append(a); box.append(c); return;
+  }
+  const r = p.resultado; const op = p.operacao; const rendaTotal = (p.cliente.rendaBruta ?? 0) + (p.cliente.segundoComprador?.rendaBruta ?? 0);
+
+  const c1 = el('section', 'card');
+  const kp = el('div', 'kpis');
+  for (const [k, v] of [['Prazo do financiamento', r.prazoMeses != null ? r.prazoMeses + ' meses' : '—'], ['Valor da primeira parcela', brl(r.primeiraParcela)], ['Valor da última parcela', brl(r.ultimaParcela)], ['Somatório das parcelas', brl(r.somatorioParcelas)]]) {
+    const k1 = el('div', 'kpi'); k1.append(el('small', null, k), el('b', null, v)); kp.append(k1);
+  }
+  c1.append(kp);
+  const acoes = el('div', 'acoes');
+  const pdf = el('button', 'btn sec', 'Gerar PDF'); pdf.onclick = () => window.print();
+  const nova = el('button', 'btn sec', 'Simular novamente'); nova.onclick = () => mostrar('tela-simulacao');
+  const prop = el('button', 'btn', 'Preencher proposta'); prop.disabled = true; prop.title = 'Em breve';
+  acoes.append(pdf, nova, prop); c1.append(acoes);
+
+  const c2 = el('section', 'card'); c2.append(el('h2', 'sec', 'Detalhamento do cálculo'), tabela([
+    ['Tipo do imóvel', op.tipoImovel], ['Renda total', brl(rendaTotal)], ['Valor do imóvel', brl(r.valorImovel ?? op.valorImovel)],
+    ['Valor da entrada', brl(r.entrada ?? op.entrada)], ['Custos adicionais (cartório e tarifas)', op.financiarItbi ? 'Incorporado' : 'Não incorporado'],
+    ['Valor total do financiamento', brl(r.valorFinanciado)], ['Sistema de amortização', r.sistema ?? op.sistema], ['Seguradora', op.seguradora],
+    ['Custo efetivo do seguro habitacional (CESH)', pct(r.ceshAnual)], ['Linha de crédito', r.linhaCredito ?? '—'],
+    ['Taxa de juros simulada', pct(r.taxaJurosAnual)], ['Correção monetária', 'Simulação sem TR'], ['IOF', brl(r.iof)], ['Custo Efetivo Total (CET)', pct(r.cetAnual)],
+  ]));
+  c2.append(el('p', 'aviso', 'Importante: isto é apenas uma simulação. A efetivação do resultado apresentado está condicionada à análise da proposta de financiamento. A taxa apresentada é apenas referência.'));
+
+  const c3 = el('section', 'card'); c3.append(el('h2', 'sec', 'Demonstração do custo efetivo total (CET)'), tabela([
+    ['1.1 Data da simulação', r.dataSimulacao ? new Date(r.dataSimulacao).toLocaleDateString('pt-BR') : '—'],
+    ['1.2 Valor solicitado do financiamento', brl(r.valorFinanciado)], ['1.3 Valor do IOF', brl(r.iof)],
+    ['1.4 Tarifa de administração do contrato (mensal)', brl(r.tarifaAdministracaoMensal)],
+    ['1.5 Primeiro prêmio do seguro MIP (morte e invalidez permanente)', brl(r.seguroMip)],
+    ['1.6 Primeiro prêmio do seguro DFI (danos físicos do imóvel)', brl(r.seguroDfi)],
+    ['1.8 Taxa de juros pré-analisada', pct(r.taxaJurosAnual)], ['1.9 Prazo do contrato', r.prazoMeses != null ? r.prazoMeses + ' meses' : '—'],
+    ['2.0 Custo efetivo total (CET)', pct(r.cetAnual)], ['a) Valor total devido', brl(r.valorTotalDevido)],
+  ]));
+  box.append(c1, c2, c3);
+}
+
+// ---------- Histórico ----------
+async function carregarHistorico() {
+  mostrar('tela-historico');
+  const corpo = $('hist-corpo'); corpo.textContent = 'Carregando…';
+  const admin = claimsAtuais.role === 'admin';
+  const base = collection(db, 'propostas');
+  const q = admin ? query(base, orderBy('criadoEm', 'desc'), limit(100))
+    : claimsAtuais.gestor ? query(base, where('imobiliariaId', '==', claimsAtuais.imobiliariaId), orderBy('criadoEm', 'desc'), limit(100))
+    : query(base, where('corretorUid', '==', auth.currentUser.uid), orderBy('criadoEm', 'desc'), limit(50));
+  $('hist-titulo').textContent = admin ? 'Todas as simulações' : claimsAtuais.gestor ? 'Simulações da imobiliária' : 'Minhas simulações';
+  try {
+    const snap = await getDocs(q);
+    if (snap.empty) return (corpo.textContent = 'Nenhuma simulação ainda.');
+    const t = el('table', 'hist'); const h = t.createTHead().insertRow();
+    ['Data', 'Cliente', 'Imóvel', 'Financiado', '1ª parcela', 'Situação'].forEach((x) => h.append(Object.assign(document.createElement('th'), { textContent: x })));
+    const tb = t.createTBody();
+    snap.forEach((d) => {
+      const p = d.data(); const r = tr_(tb);
+      r.insertCell().textContent = p.criadoEm?.toDate().toLocaleString('pt-BR') ?? '—';
+      r.insertCell().textContent = `${p.cliente?.nome ?? '—'} (***.***.***-${(p.cliente?.cpf ?? '').slice(-2)})`;
+      r.insertCell().textContent = brl(p.operacao?.valorImovel);
+      r.insertCell().textContent = brl(p.resultado?.valorFinanciado);
+      r.insertCell().textContent = brl(p.resultado?.primeiraParcela);
+      const c = r.insertCell(); const tag = el('span', 'tag ' + p.status, p.status); c.append(tag);
+      r.style.cursor = p.status === 'simulado' || p.status === 'erro' ? 'pointer' : 'default';
+      r.onclick = () => { if (p.status === 'simulado' || p.status === 'erro') { renderResultado(p); mostrar('tela-resultado'); } };
+    });
+    corpo.replaceChildren(t);
+  } catch (err) { corpo.textContent = 'Não foi possível carregar o histórico (' + err.code + ').'; }
+}
+const tr_ = (tb) => tb.insertRow();
+
+$('form-sim').addEventListener('reset', () => setTimeout(atualizaTotal));
