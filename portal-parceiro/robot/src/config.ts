@@ -4,6 +4,9 @@ const schema = z.object({
   ITAU_URL_LOGIN: z.string().url(),
   ITAU_USUARIO: z.string().min(1),
   ITAU_SENHA: z.string().min(1),
+  ITAU_URL_PROPOSTA: z.string().url().optional(), // link direto de envio_proposta_isolado.html
+  // TRAVAS: sem 'true' o robô NÃO confirma proposta (só preenche até a revisão e para: modo de teste). Cada envio cria uma proposta REAL no banco.
+  PROPOSTA_ENVIO_HABILITADO: z.enum(['true', 'false']).default('false'),
   ITAU_URL_SIMULADOR: z.string().url().optional(), // link direto da tela "Simulador Isolado" (evita navegar pelo menu)
   ITAU_CODIGO_CORRESPONDENTE: z.string().optional(),
   FIREBASE_SERVICE_ACCOUNT_B64: z.string().min(10),

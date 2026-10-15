@@ -1,14 +1,17 @@
 import { chromium, type Browser } from 'playwright-core';
 import { config } from '../config.js';
-import type { DadosSimulacao, ResultadoItau } from '../types.js';
+import type { DadosProposta, DadosSimulacao, ResultadoItau, ResultadoProposta } from '../types.js';
 import { login, logout } from './login.js';
+import { enviarProposta } from './proposta.js';
 import { preencherESimular } from './simulacao.js';
 
 /** Abre um browser, roda o fluxo completo e SEMPRE fecha (finally). Um contexto limpo por proposta: sem vazar cookies/dados entre clientes. */
-export async function executarSimulacao(
-  dados: DadosSimulacao,
-  opts: { browser?: Browser; executablePath?: string; args?: string[] } = {},
-): Promise<ResultadoItau> {
+type Opts = { browser?: Browser; executablePath?: string; args?: string[] };
+
+export const executarSimulacao = (dados: DadosSimulacao, opts: Opts = {}) => comSessao((page) => preencherESimular(page, dados), opts);
+export const executarProposta = (dados: DadosProposta, scrRegistrado: boolean, opts: Opts = {}) => comSessao((page) => enviarProposta(page, dados, scrRegistrado), opts);
+
+async function comSessao<T>(fn: (page: import('playwright-core').Page) => Promise<T>, opts: Opts): Promise<T> {
   const dono = !opts.browser;
   const browser = opts.browser ?? await chromium.launch({ headless: config.HEADLESS === 'true', executablePath: opts.executablePath, args: opts.args });
   const context = await browser.newContext({ locale: 'pt-BR', viewport: { width: 1366, height: 800 } });
@@ -17,7 +20,7 @@ export async function executarSimulacao(
   const page = await context.newPage();
   try {
     await login(page);
-    const r = await preencherESimular(page, dados);
+    const r = await fn(page);
     await logout(page);
     return r;
   } catch (e) {

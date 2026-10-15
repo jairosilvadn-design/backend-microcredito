@@ -1,17 +1,18 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, doc, setDoc, addDoc, collection, onSnapshot, serverTimestamp, query, where, orderBy, limit, getDocs }
+import { getFirestore, doc, setDoc, getDoc, addDoc, collection, onSnapshot, serverTimestamp, query, where, orderBy, limit, getDocs }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 import { marca } from './marca.js';
+import { iniciarProposta } from './proposta.js';
 import { opcoes, VALOR_MIN_IMOVEL, ENTRADA_MIN_PERCENTUAL, PRAZO_MAX_MESES, PRAZO_MIN_MESES, PRAZO_MIN_MIX_RESIDENCIAL, IDADE_PRAZO_MAX_MESES } from './opcoes.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const $ = (id) => document.getElementById(id);
-const secoes = ['tela-pendente', 'tela-simulacao', 'tela-resultado', 'tela-historico'];
+const secoes = ['tela-pendente', 'tela-simulacao', 'tela-resultado', 'tela-historico', 'tela-proposta', 'tela-revisao', 'tela-proposta-resultado'];
 const mostrar = (t) => {
   const logado = t !== 'login';
   $('tela-login').classList.toggle('hidden', logado);
@@ -19,6 +20,7 @@ const mostrar = (t) => {
   secoes.forEach((x) => $(x).classList.toggle('hidden', x !== t));
   $('nav-sim').classList.toggle('ativo', t === 'tela-simulacao' || t === 'tela-resultado');
   $('nav-hist').classList.toggle('ativo', t === 'tela-historico');
+  $('nav-prop').classList.toggle('ativo', ['tela-proposta', 'tela-revisao', 'tela-proposta-resultado'].includes(t));
   window.scrollTo(0, 0);
 };
 const carregando = (on, txt) => { $('carregando').classList.toggle('hidden', !on); if (txt) $('carregando-txt').textContent = txt; };
@@ -33,6 +35,7 @@ const soDigitos = (s) => (s ?? '').replace(/\D/g, '');
 let cadastro = false;
 let unsubProposta = null;
 let claimsAtuais = {};
+let perfilAtual = {};
 
 // ---------- Listas de seleção ----------
 for (const [id, lista] of Object.entries({ segmento: opcoes.segmento, estadoCivil: opcoes.estadoCivil, tipoImovel: opcoes.tipoImovel, seguradora: opcoes.seguradora, sistema: opcoes.sistema })) {
@@ -97,6 +100,7 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) return mostrar('login');
   const { claims } = await user.getIdTokenResult(true);
   claimsAtuais = claims;
+  perfilAtual = (await getDoc(doc(db, 'parceiros', user.uid)).catch(() => null))?.data?.() ?? {};
   $('user-nome').textContent = user.email;
   const ok = !!claims.aprovado;
   ['nav-sim', 'nav-hist', 'nav-prop', 'nav-acomp'].forEach((id) => $(id).classList.toggle('hidden', !ok));
@@ -104,6 +108,8 @@ onAuthStateChanged(auth, async (user) => {
 });
 $('nav-sim').onclick = () => mostrar('tela-simulacao');
 $('nav-hist').onclick = () => carregarHistorico();
+const prop = iniciarProposta({ auth, db, getClaims: async () => claimsAtuais, mostrar, carregando, perfil: () => perfilAtual });
+$('nav-prop').onclick = () => { prop.aplicaPerfil(); mostrar('tela-proposta'); };
 
 // ---------- Formulário ----------
 const somar = () => document.querySelector('input[name=somar]:checked').value === 'sim';
@@ -280,9 +286,9 @@ function renderHistorico() {
     r.insertCell().textContent = brl(p.resultado?.primeiraParcela);
     r.insertCell().textContent = p.resultado?.taxaJurosAnual != null ? pct(p.resultado.taxaJurosAnual).replace(' a.a.', '') : '—';
     r.insertCell().append(el('span', 'tag ' + p.status, p.status));
-    const abre = p.status === 'simulado' || p.status === 'erro';
+    const ehProp = p.tipo === 'proposta'; const abre = ['simulado', 'erro', 'enviada', 'preenchida'].includes(p.status);
     r.style.cursor = abre ? 'pointer' : 'default';
-    if (abre) r.onclick = () => { renderResultado(p); mostrar('tela-resultado'); };
+    if (abre) r.onclick = () => { if (ehProp) { window.__renderPropostaResultado(p); mostrar('tela-proposta-resultado'); } else { renderResultado(p); mostrar('tela-resultado'); } };
   }
   corpo.replaceChildren(t);
 }
@@ -290,3 +296,20 @@ $('f-ok').onclick = renderHistorico;
 $('f-limpar').onclick = () => { ['f-ini', 'f-fim', 'f-cpf', 'f-nome'].forEach((id) => { $(id).value = ''; }); renderHistorico(); };
 
 $('form-sim').addEventListener('reset', () => setTimeout(atualizaTotal));
+
+// ---------- Resultado da proposta ----------
+window.__renderPropostaResultado = (p) => {
+  const box = $('proposta-resultado'); box.replaceChildren();
+  const c = el('section', 'card'); const acoes = el('div', 'acoes');
+  const novo = el('button', 'btn', 'Nova proposta'); novo.onclick = () => { prop.limpar(); mostrar('tela-proposta'); };
+  const ini = el('button', 'btn sec', 'Ir para o início'); ini.onclick = () => carregarHistorico(); acoes.append(ini, novo);
+  if (p.status === 'enviada') {
+    c.append(el('h2', 'sec', 'Proposta enviada ao banco'), el('p', null, 'Número da proposta:'), el('div', 'total', String(p.resultado?.numeroProposta ?? '—')),
+      el('p', 'aviso', 'A análise de crédito começa agora. O resultado (aprovada, condicionada ou recusada) aparece no Início conforme o banco avança.'));
+  } else if (p.status === 'preenchida') {
+    c.append(el('h2', 'sec', 'Teste concluído: proposta preenchida, NÃO enviada'), el('p', null, 'O robô percorreu o formulário do banco e parou antes de confirmar (modo de teste).'));
+  } else {
+    c.append(el('h2', 'sec', 'A proposta não foi enviada'), el('p', 'erro', p.erro?.mensagemUsuario ?? 'Tente novamente ou fale com o suporte.'));
+  }
+  c.append(acoes); box.append(c);
+};

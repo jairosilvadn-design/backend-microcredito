@@ -19,6 +19,13 @@ Esta pasta é independente do restante do repositório (tem `package.json`/`netl
 **intercepta essa resposta** e a devolve ao site; se o portal recusar por regra (idade, prazo, entrada mínima…), a mensagem dele vai para o corretor.
 Regras do simulador replicadas no formulário (`frontend/opcoes.js`): imóvel mínimo R$ 97.561 (residencial) / R$ 100.000 (comercial),
 entrada mínima 20%, prazo 12–420 meses (residencial) ou 12–240 (comercial), 48 mínimo para MIX residencial, maior de 18 anos.
+**Enviar proposta (imóvel pronto).** A tela do site replica a de `envio_proposta_isolado.html`: financiamento, taxa e custos, dados pessoais, cônjuge/união estável,
+composição de renda, PDV/canal e contato, revisão e o **aceite do SCR** (declaração do corretor sobre a autorização do cliente; fica gravada com uid, e-mail e hora, e as
+regras do Firestore recusam proposta sem ele). No portal o envio chama `POST /api/proposta/ApiEnvioPropostaModernizado/`, que devolve o **número da proposta**
+(a aprovação/recusa vem depois, na Home). Travas do robô: `PROPOSTA_ENVIO_HABILITADO=false` por padrão (preenche até a revisão e para: modo de teste, rode com `HEADLESS=false`
+e um humano olhando); proposta **nunca é reenviada automaticamente** (evita duplicidade); depois de processada, os dados pessoais da proposta são apagados do Firestore.
+PDV: o administrador grava o código do PDV de cada imobiliária (`definir-papel.mjs <uid> imobiliaria <id> gestor <pdv>`).
+
 Ainda pendentes: o botão e a página de login (`seletores.ts`, hoje placeholder) e a constante de idade/prazo máximo (`prazos.js` do portal, hoje estimada).
 
 **Identidade visual.** O layout, os campos, os textos e o fluxo seguem o simulador do Itaú, mas a marca é a do parceiro: nome, cores,

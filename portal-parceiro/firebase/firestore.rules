@@ -22,7 +22,10 @@ service cloud.firestore {
         && request.resource.data.status == 'pendente'
         && request.resource.data.corretorUid == request.auth.uid
         && request.resource.data.imobiliariaId == request.auth.token.imobiliariaId
-        && request.resource.data.resultado == null;
+        && request.resource.data.resultado == null
+        // proposta ao banco exige a declaração de aceite do SCR do cliente, feita por quem está logado
+        && (request.resource.data.get('tipo', 'simulacao') != 'proposta'
+            || (request.resource.data.consentimentoScr.aceito == true && request.resource.data.consentimentoScr.uid == request.auth.uid));
       allow update, delete: if false;
 
       match /historico/{h} { allow read: if aprovado(); allow write: if false; }

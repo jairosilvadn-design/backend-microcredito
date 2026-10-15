@@ -35,7 +35,7 @@
       <nav>
         <button id="nav-hist" class="ativo">Início</button>
         <button id="nav-sim">Simular financiamento</button>
-        <button id="nav-prop" disabled title="Em breve">Enviar proposta</button>
+        <button id="nav-prop">Enviar proposta</button>
         <button id="nav-acomp" disabled title="Em breve">Acompanhamento</button>
       </nav>
       <div class="user"><span id="user-nome"></span><button class="btn-sair" id="sair">Sair</button></div>
@@ -112,6 +112,34 @@
           <div class="acoes"><button class="btn" id="enviar">Simular</button></div>
           <p id="msg-sim" class="erro"></p>
         </form>
+      </div>
+
+      <!-- PROPOSTA -->
+      <div id="tela-proposta" class="hidden">
+        <div class="migalha"><b>Home</b> › Enviar proposta › Imóvel pronto (Isolado)</div>
+        <h1 class="titulo">Enviar proposta — imóvel pronto</h1>
+        <p class="sub">Preencha os dados do cliente. Na próxima etapa você confere tudo e confirma.</p>
+        <form class="card" id="form-proposta" novalidate>
+          <div id="proposta-form"></div>
+          <div class="acoes"><button class="btn" id="proposta-revisar" type="button">Revisar dados</button></div>
+          <p id="msg-prop" class="erro"></p>
+        </form>
+      </div>
+      <div id="tela-revisao" class="hidden">
+        <div class="migalha"><b>Home</b> › Enviar proposta › Confirmar dados</div>
+        <h1 class="titulo">Confirme os dados da proposta</h1>
+        <section class="card">
+          <div id="revisao-corpo"></div>
+          <label class="l" style="margin-top:14px"><input type="checkbox" id="scr-ok"> <span id="scr-texto"></span></label>
+          <p class="aviso">Ao marcar, você declara que o cliente foi informado e autorizou a consulta ao SCR. O sistema registra seu nome, e-mail, data e hora como comprovante.</p>
+          <div class="acoes"><button class="btn sec" id="proposta-voltar" type="button">Voltar e corrigir</button><button class="btn" id="proposta-enviar" type="button" disabled>Enviar proposta</button></div>
+          <p id="msg-rev" class="erro"></p>
+        </section>
+      </div>
+      <div id="tela-proposta-resultado" class="hidden" aria-live="polite">
+        <div class="migalha"><b>Home</b> › Enviar proposta › Resultado</div>
+        <h1 class="titulo">Proposta</h1>
+        <div id="proposta-resultado"></div>
       </div>
 
       <!-- RESULTADO -->

@@ -26,3 +26,6 @@ export const propostaOpcoes = {
 };
 // Texto de consentimento que o portal exige marcar antes de enviar. É uma declaração do corretor sobre a autorização DO CLIENTE:
 export const TEXTO_SCR = 'O cliente foi informado e autorizou a consulta das suas informações mantidas no sistema de informações de crédito (SCR) organizado pelo Banco Central do Brasil.';
+
+// Limites da tela de proposta (title/min dos campos do portal): imóvel residencial a partir de R$ 33.000 (diferente do simulador).
+export const VALOR_MIN_IMOVEL_PROPOSTA = { RESIDENTIAL: 33000, COMMERCIAL: 100000 }; // comercial: A CONFIRMAR

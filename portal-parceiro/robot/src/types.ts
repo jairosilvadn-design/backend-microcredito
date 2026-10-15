@@ -34,3 +34,23 @@ export interface ResultadoItau {
   valorTotalDevido: number | null;
   tarifaAvaliacao: number | null;
 }
+
+export interface PessoaProposta {
+  nome: string; nascimento: string; cpf: string; cep: string; endereco: string; bairro: string; cidade: string; uf: string;
+  rendaBruta: number; tipoRenda: string; cnpj: string; email: string; telefone: string;
+}
+/** Dados da tela "Enviar proposta → Isolado" (valores = os `value` das listas do portal). */
+export interface DadosProposta {
+  financiamento: {
+    tipoImovel: 'RESIDENTIAL' | 'COMMERCIAL'; estadoImovel: string; valorImovel: number; entrada: number; prazoMeses: number;
+    seguradora: string; sistema: 'SAC' | 'HYBRID'; taxa: 'STANDARD' | 'SAVINGS'; financiarItbi: boolean; percentualItbi: string; financiarAvaliacao: boolean;
+  };
+  principal: PessoaProposta & { estadoCivil: string; uniaoEstavel: boolean };
+  conjuge: { nome: string; cpf: string; nascimento: string; telefone: string; estadoCivil: string } | null;
+  compoeRenda: boolean;
+  segundo: (Omit<PessoaProposta, 'nascimento'> & { nascimento: string; estadoCivil: string; mesmoEndereco: boolean }) | null;
+  pdv: string;
+  canal: { vincularParceiro: boolean; codigoItau: string };
+  contato: { preferencial: boolean; nome: string; email: string; telefone: string };
+}
+export interface ResultadoProposta { status: 'ENVIADA' | 'PREENCHIDA'; numeroProposta: string | null }
