@@ -16,4 +16,7 @@ const schema = z.object({
   ROBO_LOCK_TTL_MS: z.coerce.number().int().default(300_000),
   HEADLESS: z.enum(['true', 'false']).default('true'),
 });
-export const config = schema.parse(process.env); // falha no boot se faltar algo
+// Colar valores no painel do host costuma deixar espaço/tab/quebra de linha invisível. Aparamos tudo, menos a senha (valor literal).
+const NAO_APARAR = new Set(['ITAU_SENHA']);
+const env = Object.fromEntries(Object.entries(process.env).map(([k, v]) => [k, NAO_APARAR.has(k) || typeof v !== 'string' ? v : v.trim()]));
+export const config = schema.parse(env); // falha no boot se faltar algo
