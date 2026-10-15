@@ -7,9 +7,12 @@ import { z } from 'zod';
 
 if (!getApps().length) initializeApp({ credential: cert(JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64!, 'base64').toString())) });
 
+const cpf = z.string().regex(/^\d{11}$/);
+const comprador = z.object({ nome: z.string().min(3), cpf, nascimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), cep: z.string().regex(/^\d{8}$/), rendaBruta: z.number().positive(), celular: z.string().regex(/^\d{10,11}$/), email: z.string().email() });
 const Body = z.object({
-  cliente: z.object({ cpf: z.string().regex(/^\d{11}$/), nascimento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), rendaBruta: z.number().positive(), fgts: z.boolean(), fgtsValor: z.number().min(0) }),
-  operacao: z.object({ valorImovel: z.number().positive(), valorFinanciamento: z.number().positive(), sistema: z.enum(['SAC', 'PRICE']) }),
+  cliente: comprador.extend({ segmento: z.string().min(1), estadoCivil: z.string().min(1), funcionarioItau: z.boolean(), segundoComprador: comprador.nullable() }),
+  operacao: z.object({ tipoImovel: z.string().min(1), seguradora: z.string().min(1), sistema: z.string().min(1), taxa: z.enum(['prefixada', 'poupanca']),
+    financiarItbi: z.boolean(), valorImovel: z.number().positive(), entrada: z.number().min(0), prazoMeses: z.number().int().min(12).max(420) }),
 });
 
 export default async (req: Request) => {

@@ -5,15 +5,22 @@
   <title>Portal do Parceiro — Crédito Imobiliário</title>
   <style>
     body{font:16px system-ui;margin:0;background:#f4f5f7;color:#1b1f24}
-    main{max-width:560px;margin:0 auto;padding:16px}
+    main{max-width:720px;margin:0 auto;padding:16px}
     section{background:#fff;border-radius:12px;padding:20px;margin:16px 0;box-shadow:0 1px 3px #0002}
+    h3{margin:22px 0 4px;font-size:16px;border-bottom:1px solid #e3e3e3;padding-bottom:4px}
     label{display:block;margin:10px 0 4px;font-size:14px}
     input,select,button{width:100%;box-sizing:border-box;padding:10px;font-size:16px;border:1px solid #bbb;border-radius:8px}
+    input[type=radio],input[type=checkbox]{width:auto;margin-right:6px}
+    .inline label{display:inline-block;margin-right:18px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+    @media(max-width:560px){.grid{grid-template-columns:1fr}}
     button{background:#ec7000;color:#fff;border:0;margin-top:16px;cursor:pointer}
     button:disabled{opacity:.6;cursor:wait}
-    .hidden{display:none}.erro{color:#b00020}.ok{color:#0a7d33}
-    .badge{display:inline-block;padding:4px 10px;border-radius:99px;font-weight:600}
-    .APROVADO{background:#d9f5e3}.RECUSADO{background:#fde0e0}.EM_ANALISE{background:#fff3cd}
+    .hidden{display:none}.erro{color:#b00020}
+    .badge{display:inline-block;padding:4px 10px;border-radius:99px;font-weight:600;background:#d9f5e3}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    td{padding:8px 4px;border-bottom:1px solid #eee;font-size:15px}td:last-child{text-align:right;font-weight:600}
+    .aviso{font-size:13px;color:#555;margin-top:12px}
   </style>
 </head>
 <body><main>
@@ -41,26 +48,64 @@
   </section>
 
   <section id="tela-simulacao" class="hidden">
-    <h2>Nova simulação</h2>
+    <h2>Simulador de financiamento imobiliário</h2>
     <form id="form-sim">
-      <label>CPF <input id="cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" required></label>
-      <label>Data de nascimento <input id="nasc" type="date" required></label>
-      <label>Renda bruta mensal (R$) <input id="renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
-      <label>Usará FGTS?
-        <select id="fgts"><option value="nao">Não</option><option value="sim">Sim</option></select></label>
-      <label id="fgts-valor-l" class="hidden">Valor do FGTS (R$) <input id="fgtsValor" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off"></label>
-      <label>Valor do imóvel (R$) <input id="imovel" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
-      <label>Valor do financiamento (R$) <input id="financ" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
-      <label>Sistema de amortização
-        <select id="sistema"><option>SAC</option><option>PRICE</option></select></label>
-      <button id="enviar">Enviar para Análise de Crédito</button>
+      <h3>Dados do comprador principal</h3>
+      <div class="grid">
+        <label>Nome completo* <input id="c1-nome" required></label>
+        <label>CPF* <input id="c1-cpf" data-cpf inputmode="numeric" maxlength="14" placeholder="000.000.000-00" required></label>
+        <label>Data de nascimento* <input id="c1-nasc" type="date" required></label>
+        <label>CEP de residência* <input id="c1-cep" data-cep inputmode="numeric" maxlength="9" placeholder="00000-000" required></label>
+        <label>Renda bruta total mensal* <input id="c1-renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
+        <label>Celular* <input id="c1-cel" data-cel inputmode="numeric" maxlength="15" placeholder="(99) 99999-9999" required></label>
+        <label>E-mail* <input id="c1-email" type="email" required></label>
+        <label>Segmento* <select id="segmento" required></select></label>
+        <label>Estado civil* <select id="estadoCivil" required></select></label>
+      </div>
+      <label>Somar renda com a de outro comprador?*</label>
+      <div class="inline">
+        <label><input type="radio" name="somar" value="sim"> Sim</label>
+        <label><input type="radio" name="somar" value="nao" checked> Não</label>
+      </div>
+
+      <div id="bloco-c2" class="hidden">
+        <h3>Dados do 2º comprador</h3>
+        <div class="grid">
+          <label>Nome completo* <input id="c2-nome"></label>
+          <label>CPF* <input id="c2-cpf" data-cpf inputmode="numeric" maxlength="14" placeholder="000.000.000-00"></label>
+          <label>Data de nascimento* <input id="c2-nasc" type="date"></label>
+          <label>CEP de residência* <input id="c2-cep" data-cep inputmode="numeric" maxlength="9" placeholder="00000-000"></label>
+          <label>Renda bruta total mensal* <input id="c2-renda" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off"></label>
+          <label>Celular* <input id="c2-cel" data-cel inputmode="numeric" maxlength="15" placeholder="(99) 99999-9999"></label>
+          <label>E-mail* <input id="c2-email" type="email"></label>
+        </div>
+      </div>
+
+      <h3>Dados do financiamento</h3>
+      <label><input type="checkbox" id="funcionario"> É funcionário Itaú?</label>
+      <div class="grid">
+        <label>Tipo de imóvel* <select id="tipoImovel" required></select></label>
+        <label>Seguradora* <select id="seguradora" required></select></label>
+        <label>Sistema de amortização* <select id="sistema" required></select></label>
+        <label>Prazo (meses)* <input id="prazo" type="number" inputmode="numeric" required></label>
+        <label>Valor do imóvel* <input id="imovel" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
+        <label>Valor da entrada* <input id="entrada" data-moeda inputmode="numeric" placeholder="R$ 0,00" autocomplete="off" required></label>
+      </div>
+      <label>Taxa do financiamento*</label>
+      <div class="inline">
+        <label><input type="radio" name="taxa" value="prefixada" checked> Taxa pré-fixada</label>
+        <label><input type="radio" name="taxa" value="poupanca"> Taxa poupança</label>
+      </div>
+      <label><input type="checkbox" id="financiarItbi"> Financiar ITBI e cartório</label>
+
+      <button id="enviar">Simular</button>
       <p id="msg-sim" class="erro"></p>
     </form>
     <p><a href="#" id="sair2">Sair</a></p>
   </section>
 
   <section id="tela-resultado" class="hidden" aria-live="polite">
-    <h2>Resultado</h2>
+    <h2>Resultado da simulação</h2>
     <div id="resultado"></div>
     <button id="nova">Nova simulação</button>
   </section>

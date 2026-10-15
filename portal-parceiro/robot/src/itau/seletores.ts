@@ -1,18 +1,26 @@
-// ⚠️ PLACEHOLDERS. Eu não tenho acesso ao Portal do Correspondente: grave os seletores reais com
-// `npx playwright codegen <URL>` na sua máquina e preencha aqui. Preferir data-testid / getByRole / getByLabel.
-// Concentrar tudo neste arquivo é de propósito: quando o Itaú mudar o HTML, só este arquivo muda.
+// IDs do formulário e do resultado extraídos do "Simulador Isolado" salvo pelo usuário (HTML real do portal) — confiáveis.
+// ⚠️ AINDA PLACEHOLDER: `login` e `menu` (a página salva não contém a tela de login nem o menu, que são carregados por script).
+// Grave-os com `npx playwright codegen <URL>` ou me envie prints/HTML da tela de login e do menu.
 export const S = {
-  login: { usuario: '#usuario', senha: '#senha', entrar: 'button[type=submit]', erro: '.mensagem-erro', logado: '#menu-principal' },
-  menu: { novaProposta: 'text=Nova Proposta' },
+  login: { usuario: '#usuario', senha: '#senha', entrar: 'button[type=submit]', erro: '.mensagem-erro', logado: '#includeSidebar' }, // PLACEHOLDER
+  menu: { simuladorIsolado: 'text=Simulador Isolado' },                                                                            // PLACEHOLDER
   form: {
-    cpf: '#cpf', nascimento: '#dataNascimento', renda: '#rendaBruta',
-    fgtsSim: '#fgts-sim', fgtsNao: '#fgts-nao', fgtsValor: '#valorFgts',
-    valorImovel: '#valorImovel', valorFinanciamento: '#valorFinanciamento',
-    sistema: '#sistemaAmortizacao', enviar: 'button:has-text("Simular")',
+    nome: '#txtNome', cpf: '#txtCPFPrincipal', nascimento: '#txtDataNascimentoPrimario', cep: '#txtCepPrincipal',
+    renda: '#txtRendaPrincipal', celular: '#txtTelefone', email: '#txtEmail',
+    segmento: '#PerfilCliente', estadoCivil: '#Estado_Civil_Principal',
+    somarSim: '#Somar_rendaY', somarNao: '#Somar_rendaN',
+    c2: { nome: '#txtNomeSegundoComprador', cpf: '#txtCPFSecundario', nascimento: '#txtDataNascimentoSecundario', cep: '#txtCepSecundario',
+          renda: '#txtRendaSecundario', celular: '#txtTelefoneSecundario', email: '#txtEmailSecundario' },
+    funcionario: '#funcionario',
+    tipoImovel: '#cboTipoImovel', financiarItbi: '#chqFinanciarITBI', seguradora: '#cboSeguradora', sistema: '#cboSistemaAmortizacao',
+    taxaPrefixada: '#taxa_padrao', taxaPoupanca: '#taxa_poupanca',
+    valorImovel: '#txtValorImovel', entrada: '#txtValorEntrada', prazo: '#txtPrazoMeses',
+    simular: '#btnSimular',
   },
   resultado: {
-    container: '#resultado-simulacao', status: '.status', valorAprovado: '.valor-aprovado',
-    taxa: '.taxa-juros', proposta: '.numero-proposta', motivo: '.motivo',
+    pronto: '#lblValorPrimeiraParcela', prazo: '#lblPrazo', primeiraParcela: '#lblValorPrimeiraParcela', ultimaParcela: '#lblValorUltimaParcela',
+    somatorio: '#lblValorSomatorioParcelas', totalFinanciado: '#colValorTotalFinanciamento', sistema: '#colSistemaAmortizacao',
+    seguradora: '#colSeguradora', linhaCredito: '#colLinhaCredito', taxa: '#colTaxaJurosSimulada', cet: '#colCET', data: '#lblDataSimulacao',
   },
-  sair: 'text=Sair',
+  sair: 'text=Sair', // PLACEHOLDER
 } as const;

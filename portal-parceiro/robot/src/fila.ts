@@ -30,8 +30,8 @@ async function processar(ref: DocumentReference) {
   const t0 = Date.now();
   try {
     const resultado = await executarSimulacao(dados);
-    await ref.update({ status: resultado.status.toLowerCase(), resultado, erro: null, concluidoEm: Timestamp.now() });
-    await ref.collection('historico').add({ status: resultado.status.toLowerCase(), em: Timestamp.now(), ms: Date.now() - t0 });
+    await ref.update({ status: 'simulado', resultado, erro: null, concluidoEm: Timestamp.now() });
+    await ref.collection('historico').add({ status: 'simulado', em: Timestamp.now(), ms: Date.now() - t0 });
     log.info({ id: ref.id, status: resultado.status, ms: Date.now() - t0 }, 'proposta concluída');
   } catch (e) {
     const err = e instanceof RoboError ? e : new RoboError('PORTAL_INDISPONIVEL', e instanceof Error ? e.message : 'erro desconhecido', true);

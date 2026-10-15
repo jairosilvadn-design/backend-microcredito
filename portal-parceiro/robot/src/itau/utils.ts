@@ -20,7 +20,8 @@ export const brParaNumero = (t?: string | null): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-export const dataBR = (iso: string) => iso.split('-').reverse().join('/'); // 1990-05-31 -> 31/05/1990
+/** 8000.5 -> "800050": máscara de dinheiro do portal recebe os dígitos em centavos. */
+export const centavos = (v: number) => String(Math.round(v * 100));
 
 export async function textoOuNull(page: Page, sel: string) {
   const l = page.locator(sel).first();

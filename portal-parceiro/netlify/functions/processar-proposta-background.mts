@@ -20,7 +20,7 @@ export default async (req: Request) => {
       { cliente: p.cliente, operacao: p.operacao },
       { executablePath: await chromium.executablePath(), args: chromium.args },
     );
-    await ref.update({ status: resultado.status.toLowerCase(), resultado, concluidoEm: Timestamp.now() });
+    await ref.update({ status: 'simulado', resultado, concluidoEm: Timestamp.now() });
   } catch (e: any) {
     await ref.update({ status: 'erro', erro: { codigo: e.codigo ?? 'DESCONHECIDO', etapa: e.etapa ?? null, mensagemUsuario: 'Tente novamente.' } });
   }

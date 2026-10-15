@@ -13,8 +13,10 @@ Esta pasta é independente do restante do repositório (tem `package.json`/`netl
 3. **LGPD.** CPF, renda e nascimento são dados pessoais. Minimize: não logar, não guardar screenshots, definir prazo de retenção
    (ex.: apagar `cliente.*` das propostas após N dias), ter base legal/consentimento do cliente com a imobiliária.
 
-Os **seletores do Itaú** em `robot/src/itau/seletores.ts` são placeholders: eu não tenho acesso ao portal. Grave os reais com
-`npx playwright codegen <URL>` e ajuste os textos de status em `simulacao.ts`.
+**Campos e seletores do Itaú.** O formulário, o robô (`robot/src/itau/seletores.ts`) e a tela de resultado seguem o HTML real do *Simulador Isolado*
+(arquivo salvo pelo parceiro). O portal **simula**: devolve parcelas, taxa e CET, e não "aprovado/recusado" (a aprovação só vem na análise da proposta).
+Ainda são placeholders: `login` e `menu` (a página salva não os contém) e as listas **tipo de imóvel, seguradora e sistema de amortização**
+(`frontend/opcoes.js`), que o portal carrega por script. Grave-os com `npx playwright codegen <URL>` ou envie prints/HTML dessas telas.
 
 ---
 ## Segurança das credenciais do Itaú (vale para as duas opções)
