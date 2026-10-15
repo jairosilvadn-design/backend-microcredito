@@ -37,7 +37,7 @@ export async function login(page: Page) {
   }
   await page.click(S.login.entrar).catch(() => { throw new RoboError('SELETOR_NAO_ENCONTRADO', 'Botão Entrar não encontrado', false, 'login-entrar', undefined); });
 
-  const limite = Date.now() + config.ROBO_TIMEOUT_MS;
+  const limite = Date.now() + Math.max(config.ROBO_TIMEOUT_MS, 45_000);
   for (;;) {
     if (alerta) throw new RoboError('LOGIN_FALHOU', 'Credencial do correspondente recusada pelo portal', false, 'login', await diag());
     if (/ChangePassword/i.test(page.url())) throw new RoboError('ACAO_HUMANA', 'O portal exige troca de senha: um humano precisa trocá-la e atualizar ITAU_SENHA', false, 'login', await diag());

@@ -162,7 +162,7 @@ export function iniciarProposta({ auth, db, getClaims, mostrar, carregando, perf
   $('proposta-voltar').onclick = () => mostrar('tela-proposta');
   $('proposta-enviar').onclick = async () => {
     if (!dadosRev || !$('scr-ok').checked) return;
-    $('proposta-enviar').disabled = true; carregando(true, 'Enviando a proposta ao banco… pode levar alguns minutos. Não feche esta página.');
+    $('proposta-enviar').disabled = true; carregando(true, 'Enviando a proposta ao banco… não feche esta página.');
     try {
       const claims = await getClaims();
       const ref = await addDoc(collection(db, 'propostas'), {

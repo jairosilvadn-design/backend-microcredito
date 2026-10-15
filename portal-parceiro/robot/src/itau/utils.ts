@@ -16,9 +16,12 @@ async function retratoDaTela(): Promise<string> {
 const resumoErro = (msg: string) => msg.split('\n').map((l) => l.trim()).filter((l) => /^(\w+\.\w+: |- waiting for|- locator|- element|- .*intercepts)/.test(l) || /Timeout/.test(l)).slice(0, 4).join(' | ').slice(0, 300);
 
 /** Executa uma etapa convertendo timeouts/seletores ausentes em RoboError tipado. */
+export const tempos: { etapa: string; ms: number }[] = []; // cronometragem de cada etapa (vai para o log)
 export async function etapa<T>(nome: string, fn: () => Promise<T>): Promise<T> {
-  try { return await fn(); }
+  const t0 = Date.now();
+  try { const r = await fn(); tempos.push({ etapa: nome, ms: Date.now() - t0 }); return r; }
   catch (e) {
+    tempos.push({ etapa: `${nome}(falhou)`, ms: Date.now() - t0 });
     if (e instanceof RoboError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     const detalhe = `${resumoErro(msg)} ${await retratoDaTela()}`.trim();
@@ -31,7 +34,7 @@ export async function etapa<T>(nome: string, fn: () => Promise<T>): Promise<T> {
 
 /** Se o portal abriu uma janela de aviso/regra (bootbox), devolve o texto; senão null. */
 export async function avisoDoPortal(page: Page): Promise<string | null> {
-  await page.waitForTimeout(350);
+  await page.waitForTimeout(120);
   const t = await page.evaluate(() => Array.from(document.querySelectorAll('.bootbox.modal .bootbox-body')).filter((e) => (e as HTMLElement).offsetParent !== null).map((e) => (e.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' ')).catch(() => '');
   return t || null;
 }
@@ -48,4 +51,13 @@ export const centavos = (v: number) => String(Math.round(v * 100));
 export async function textoOuNull(page: Page, sel: string) {
   const l = page.locator(sel).first();
   return (await l.count()) ? (await l.innerText()).trim() : null;
+}
+
+/** Espera a tela desejada. Se aparecer a tela de login no lugar, a sessão salva venceu (ou foi derrubada): sinaliza para refazer o login. */
+export async function esperarTelaOuLogin(page: Page, seletorTela: string) {
+  const vencedor = await Promise.race([
+    page.waitForSelector(seletorTela, { state: 'attached' }).then(() => 'tela' as const),
+    page.waitForSelector('#txtUsuario', { state: 'visible' }).then(() => 'login' as const),
+  ]);
+  if (vencedor === 'login') throw new RoboError('SESSAO_EXPIRADA', 'Sessão do portal expirada', false, 'sessao');
 }

@@ -3,11 +3,11 @@ import { config } from '../config.js';
 import type { DadosProposta, PessoaProposta, ResultadoProposta } from '../types.js';
 import { RoboError } from './erros.js';
 import { S } from './seletores.js';
-import { avisoDoPortal, centavos, etapa } from './utils.js';
+import { avisoDoPortal, centavos, esperarTelaOuLogin, etapa } from './utils.js';
 
 const P = S.proposta;
 const digitar = async (page: Page, sel: string, texto: string) => {
-  const l = page.locator(sel); await l.click(); await l.fill(''); await l.pressSequentially(texto, { delay: 15 }); await l.blur();
+  const l = page.locator(sel); await l.click(); await l.fill(''); await l.pressSequentially(texto, { delay: 0 }); await l.blur();
   const aviso = await avisoDoPortal(page); // regra/erro de campo mostrado pelo portal em janela
   if (aviso) throw new RoboError('DADOS_INVALIDOS', `Portal recusou os dados: ${aviso}`, false, 'preencher');
 };
@@ -72,7 +72,7 @@ async function preencher(page: Page, d: DadosProposta) {
 export async function enviarProposta(page: Page, d: DadosProposta, consentimentoScrRegistrado: boolean): Promise<ResultadoProposta> {
   await etapa('abrir-proposta', async () => {
     if (!config.ITAU_URL_PROPOSTA) throw new RoboError('DADOS_INVALIDOS', 'ITAU_URL_PROPOSTA não configurada no robô', false, 'abrir-proposta');
-    await page.goto(config.ITAU_URL_PROPOSTA, { waitUntil: 'domcontentloaded' }); await page.waitForSelector(P.tipoImovel);
+    await page.goto(config.ITAU_URL_PROPOSTA, { waitUntil: 'domcontentloaded' }); await esperarTelaOuLogin(page, P.tipoImovel);
   });
   await preencher(page, d);
 

@@ -3,13 +3,13 @@ import { config } from '../config.js';
 import type { Comprador, DadosSimulacao, ResultadoItau } from '../types.js';
 import { RoboError } from './erros.js';
 import { S } from './seletores.js';
-import { avisoDoPortal, centavos, etapa } from './utils.js';
+import { avisoDoPortal, centavos, esperarTelaOuLogin, etapa } from './utils.js';
 
 /** Campos com máscara (jquery.mask / maskMoney): digitar tecla a tecla é mais fiel que fill(). */
 const digitar = async (page: Page, sel: string, texto: string) => {
   await page.locator(sel).click();
   await page.locator(sel).fill('');
-  await page.locator(sel).pressSequentially(texto, { delay: 15 });
+  await page.locator(sel).pressSequentially(texto, { delay: 0 });
   await page.locator(sel).blur(); // o portal consulta o CEP e valida CPF/renda no onblur
   await recusaDoPortal(page, 'preencher');
 };
@@ -34,11 +34,12 @@ async function preencherComprador(page: Page, sel: Record<keyof typeof S.form.c2
   await page.fill(sel.email, c.email);
 }
 
+export const simulacaoRapida = (page: Page, d: DadosSimulacao) => preencherESimular(page, d);
 export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<ResultadoItau> {
   await etapa('abrir-simulador', async () => {
     if (config.ITAU_URL_SIMULADOR) await page.goto(config.ITAU_URL_SIMULADOR, { waitUntil: 'domcontentloaded' });
     else await page.click(S.menu.simuladorIsolado);
-    await page.waitForSelector(S.form.cpf);
+    await esperarTelaOuLogin(page, S.form.cpf);
   });
 
   await etapa('comprador-principal', async () => {

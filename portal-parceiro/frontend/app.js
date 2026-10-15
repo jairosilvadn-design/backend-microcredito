@@ -174,7 +174,7 @@ $('form-sim').onsubmit = async (e) => {
   const erro = validar(c1, c2, op);
   if (erro) return ($('msg-sim').textContent = erro);
 
-  btn.disabled = true; carregando(true, 'Simulando no banco… pode levar até 1–2 min');
+  btn.disabled = true; carregando(true, 'Consultando o banco… normalmente leva menos de 1 minuto');
   try {
     const { claims } = await auth.currentUser.getIdTokenResult();
     const ref = await addDoc(collection(db, 'propostas'), {
