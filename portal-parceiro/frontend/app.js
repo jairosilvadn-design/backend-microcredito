@@ -213,6 +213,7 @@ function renderResultado(p) {
   const box = $('resultado'); box.replaceChildren();
   if (p.status === 'erro') {
     const c = el('section', 'card'); c.append(el('h2', 'sec', 'Não foi possível simular'), el('p', 'erro', p.erro?.mensagemUsuario ?? 'Tente novamente ou fale com o suporte.'));
+    if (claimsAtuais.role === 'admin' && p.erro) { const d = el('pre', 'aviso', `[admin] codigo=${p.erro.codigo} etapa=${p.erro.etapa ?? '-'}\n${p.erro.detalhe ?? ''}`); d.style.whiteSpace = 'pre-wrap'; c.append(d); } // detalhe técnico só para o administrador
     const a = el('div', 'acoes'); const b = el('button', 'btn', 'Voltar e ajustar'); b.onclick = () => mostrar('tela-simulacao'); a.append(b); c.append(a); box.append(c); return;
   }
   const r = p.resultado; const op = p.operacao; const rendaTotal = (p.cliente.rendaBruta ?? 0) + (p.cliente.segundoComprador?.rendaBruta ?? 0);
@@ -318,6 +319,7 @@ window.__renderPropostaResultado = (p) => {
     c.append(el('h2', 'sec', 'Teste concluído: proposta preenchida, NÃO enviada'), el('p', null, 'O robô percorreu o formulário do banco e parou antes de confirmar (modo de teste).'));
   } else {
     c.append(el('h2', 'sec', 'A proposta não foi enviada'), el('p', 'erro', p.erro?.mensagemUsuario ?? 'Tente novamente ou fale com o suporte.'));
+    if (claimsAtuais.role === 'admin' && p.erro) { const d = el('pre', 'aviso', `[admin] codigo=${p.erro.codigo} etapa=${p.erro.etapa ?? '-'}\n${p.erro.detalhe ?? ''}`); d.style.whiteSpace = 'pre-wrap'; c.append(d); }
   }
   c.append(acoes); box.append(c);
 };
