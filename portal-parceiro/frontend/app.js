@@ -99,8 +99,8 @@ onAuthStateChanged(auth, async (user) => {
   claimsAtuais = claims;
   $('user-nome').textContent = user.email;
   const ok = !!claims.aprovado;
-  $('nav-sim').classList.toggle('hidden', !ok); $('nav-hist').classList.toggle('hidden', !ok);
-  mostrar(ok ? 'tela-simulacao' : 'tela-pendente');
+  ['nav-sim', 'nav-hist', 'nav-prop', 'nav-acomp'].forEach((id) => $(id).classList.toggle('hidden', !ok));
+  if (ok) carregarHistorico(); else mostrar('tela-pendente');
 });
 $('nav-sim').onclick = () => mostrar('tela-simulacao');
 $('nav-hist').onclick = () => carregarHistorico();
@@ -164,7 +164,7 @@ $('form-sim').onsubmit = async (e) => {
   try {
     const { claims } = await auth.currentUser.getIdTokenResult();
     const ref = await addDoc(collection(db, 'propostas'), {
-      status: 'pendente', resultado: null, erro: null, tentativas: 0,
+      tipo: 'simulacao', status: 'pendente', resultado: null, erro: null, tentativas: 0,
       corretorUid: auth.currentUser.uid, imobiliariaId: claims.imobiliariaId,
       cliente: { ...c1, segmento: $('segmento').value, estadoCivil: $('estadoCivil').value, funcionarioItau: $('funcionario').checked, segundoComprador: c2 },
       operacao: op,
@@ -237,36 +237,56 @@ function renderResultado(p) {
   box.append(c1, c2, c3);
 }
 
-// ---------- Histórico ----------
+// ---------- Início: painel + lista (filtros no navegador) ----------
+let docsHist = [];
 async function carregarHistorico() {
   mostrar('tela-historico');
   const corpo = $('hist-corpo'); corpo.textContent = 'Carregando…';
   const admin = claimsAtuais.role === 'admin';
   const base = collection(db, 'propostas');
-  const q = admin ? query(base, orderBy('criadoEm', 'desc'), limit(100))
-    : claimsAtuais.gestor ? query(base, where('imobiliariaId', '==', claimsAtuais.imobiliariaId), orderBy('criadoEm', 'desc'), limit(100))
-    : query(base, where('corretorUid', '==', auth.currentUser.uid), orderBy('criadoEm', 'desc'), limit(50));
-  $('hist-titulo').textContent = admin ? 'Todas as simulações' : claimsAtuais.gestor ? 'Simulações da imobiliária' : 'Minhas simulações';
-  try {
-    const snap = await getDocs(q);
-    if (snap.empty) return (corpo.textContent = 'Nenhuma simulação ainda.');
-    const t = el('table', 'hist'); const h = t.createTHead().insertRow();
-    ['Data', 'Cliente', 'Imóvel', 'Financiado', '1ª parcela', 'Situação'].forEach((x) => h.append(Object.assign(document.createElement('th'), { textContent: x })));
-    const tb = t.createTBody();
-    snap.forEach((d) => {
-      const p = d.data(); const r = tr_(tb);
-      r.insertCell().textContent = p.criadoEm?.toDate().toLocaleString('pt-BR') ?? '—';
-      r.insertCell().textContent = `${p.cliente?.nome ?? '—'} (***.***.***-${(p.cliente?.cpf ?? '').slice(-2)})`;
-      r.insertCell().textContent = brl(p.operacao?.valorImovel);
-      r.insertCell().textContent = brl(p.resultado?.valorFinanciado);
-      r.insertCell().textContent = brl(p.resultado?.primeiraParcela);
-      const c = r.insertCell(); const tag = el('span', 'tag ' + p.status, p.status); c.append(tag);
-      r.style.cursor = p.status === 'simulado' || p.status === 'erro' ? 'pointer' : 'default';
-      r.onclick = () => { if (p.status === 'simulado' || p.status === 'erro') { renderResultado(p); mostrar('tela-resultado'); } };
-    });
-    corpo.replaceChildren(t);
-  } catch (err) { corpo.textContent = 'Não foi possível carregar o histórico (' + err.code + ').'; }
+  const q = admin ? query(base, orderBy('criadoEm', 'desc'), limit(300))
+    : claimsAtuais.gestor ? query(base, where('imobiliariaId', '==', claimsAtuais.imobiliariaId), orderBy('criadoEm', 'desc'), limit(300))
+    : query(base, where('corretorUid', '==', auth.currentUser.uid), orderBy('criadoEm', 'desc'), limit(200));
+  $('hist-titulo').textContent = admin ? 'Todas as simulações e propostas' : claimsAtuais.gestor ? 'Simulações e propostas da imobiliária' : 'Suas simulações e propostas';
+  try { docsHist = (await getDocs(q)).docs.map((d) => d.data()); }
+  catch (err) { corpo.textContent = 'Não foi possível carregar (' + err.code + ').'; return; }
+  renderHistorico();
 }
-const tr_ = (tb) => tb.insertRow();
+
+function renderHistorico() {
+  const ini = $('f-ini').value ? new Date($('f-ini').value + 'T00:00:00') : null;
+  const fim = $('f-fim').value ? new Date($('f-fim').value + 'T23:59:59') : null;
+  const cpf = soDigitos($('f-cpf').value); const nome = $('f-nome').value.trim().toLowerCase();
+  const lista = docsHist.filter((p) => {
+    const d = p.criadoEm?.toDate?.();
+    return (!ini || (d && d >= ini)) && (!fim || (d && d <= fim)) && (!cpf || (p.cliente?.cpf ?? '').includes(cpf)) && (!nome || (p.cliente?.nome ?? '').toLowerCase().includes(nome));
+  });
+  const props = lista.filter((p) => p.tipo === 'proposta');
+  $('k-sim').textContent = lista.filter((p) => p.tipo !== 'proposta').length; $('k-env').textContent = props.length;
+  $('k-apr').textContent = props.filter((p) => p.status === 'aprovada').length; $('k-rec').textContent = props.filter((p) => p.status === 'recusada').length;
+  const corpo = $('hist-corpo');
+  if (!lista.length) return (corpo.textContent = 'Nenhum registro encontrado.');
+  const t = el('table', 'hist'); const h = t.createTHead().insertRow();
+  ['Data', 'Cliente', 'CPF', 'Tipo', 'Valor do imóvel', 'Valor financiado', '1ª parcela', 'Taxa a.a.', 'Situação'].forEach((x) => h.append(Object.assign(document.createElement('th'), { textContent: x })));
+  const tb = t.createTBody();
+  for (const p of lista) {
+    const r = tb.insertRow();
+    r.insertCell().textContent = p.criadoEm?.toDate().toLocaleString('pt-BR') ?? '—';
+    r.insertCell().textContent = p.cliente?.nome ?? '—';
+    r.insertCell().textContent = `***.***.***-${(p.cliente?.cpf ?? '').slice(-2)}`;
+    r.insertCell().textContent = p.tipo === 'proposta' ? 'Proposta' : 'Simulação';
+    r.insertCell().textContent = brl(p.operacao?.valorImovel);
+    r.insertCell().textContent = brl(p.resultado?.valorFinanciado);
+    r.insertCell().textContent = brl(p.resultado?.primeiraParcela);
+    r.insertCell().textContent = p.resultado?.taxaJurosAnual != null ? pct(p.resultado.taxaJurosAnual).replace(' a.a.', '') : '—';
+    r.insertCell().append(el('span', 'tag ' + p.status, p.status));
+    const abre = p.status === 'simulado' || p.status === 'erro';
+    r.style.cursor = abre ? 'pointer' : 'default';
+    if (abre) r.onclick = () => { renderResultado(p); mostrar('tela-resultado'); };
+  }
+  corpo.replaceChildren(t);
+}
+$('f-ok').onclick = renderHistorico;
+$('f-limpar').onclick = () => { ['f-ini', 'f-fim', 'f-cpf', 'f-nome'].forEach((id) => { $(id).value = ''; }); renderHistorico(); };
 
 $('form-sim').addEventListener('reset', () => setTimeout(atualizaTotal));

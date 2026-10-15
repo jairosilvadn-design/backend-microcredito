@@ -33,8 +33,10 @@
     <header>
       <div class="banner"><span class="logo" data-marca="iniciais">PI</span><span data-marca="nome">Portal da Imobiliária</span></div>
       <nav>
-        <button id="nav-sim" class="ativo">Simulador</button>
-        <button id="nav-hist">Minhas simulações</button>
+        <button id="nav-hist" class="ativo">Início</button>
+        <button id="nav-sim">Simular financiamento</button>
+        <button id="nav-prop" disabled title="Em breve">Enviar proposta</button>
+        <button id="nav-acomp" disabled title="Em breve">Acompanhamento</button>
       </nav>
       <div class="user"><span id="user-nome"></span><button class="btn-sair" id="sair">Sair</button></div>
     </header>
@@ -119,11 +121,27 @@
         <div id="resultado"></div>
       </div>
 
-      <!-- HISTÓRICO -->
+      <!-- INÍCIO (painel) -->
       <div id="tela-historico" class="hidden">
-        <div class="migalha"><b>Home</b> › Minhas simulações</div>
-        <h1 class="titulo" id="hist-titulo">Minhas simulações</h1>
-        <section class="card"><div id="hist-corpo">Carregando…</div></section>
+        <div class="migalha"><b>Home</b> › Página principal</div>
+        <h1 class="titulo">Plataforma digital — <span data-marca="nome">Portal da Imobiliária</span></h1>
+        <p class="sub" id="hist-titulo">Suas simulações e propostas</p>
+        <div class="kpis" id="home-kpis">
+          <div class="kpi"><small>Simulações realizadas</small><b id="k-sim">0</b></div>
+          <div class="kpi"><small>Propostas enviadas</small><b id="k-env">0</b></div>
+          <div class="kpi"><small>Propostas aprovadas</small><b id="k-apr">0</b></div>
+          <div class="kpi"><small>Propostas recusadas</small><b id="k-rec">0</b></div>
+        </div>
+        <section class="card">
+          <div class="grid" style="grid-template-columns:repeat(4,1fr)">
+            <div><label class="l" for="f-ini">Data início</label><input id="f-ini" type="date"></div>
+            <div><label class="l" for="f-fim">Data fim</label><input id="f-fim" type="date"></div>
+            <div><label class="l" for="f-cpf">CPF</label><input id="f-cpf" data-cpf inputmode="numeric" maxlength="14" placeholder="___.___.___-__"></div>
+            <div><label class="l" for="f-nome">Nome do cliente</label><input id="f-nome"></div>
+          </div>
+          <div class="acoes"><button class="btn sec" id="f-limpar" type="button">Limpar filtros</button><button class="btn" id="f-ok" type="button">Pesquisar</button></div>
+          <div id="hist-corpo" style="overflow-x:auto;margin-top:10px">Carregando…</div>
+        </section>
       </div>
     </main>
     <footer id="rodape"></footer>
