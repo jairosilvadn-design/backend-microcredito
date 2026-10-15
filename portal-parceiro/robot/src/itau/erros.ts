@@ -5,5 +5,7 @@ export class RoboError extends Error {
     message: string,
     public readonly retentavel = false,
     public readonly etapa?: string,
+    /** Diagnóstico técnico SEM dados pessoais nem credenciais (url, status HTTP, textos de aviso da tela). Vai para o log e para erro.detalhe. */
+    public readonly detalhe?: string,
   ) { super(message); }
 }

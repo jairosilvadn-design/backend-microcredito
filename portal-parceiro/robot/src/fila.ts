@@ -51,14 +51,14 @@ async function processar(ref: DocumentReference) {
     const tentativas = ((await ref.get()).data()?.tentativas as number) ?? 1;
     // Proposta NUNCA volta para a fila sozinha: repetir poderia criar proposta duplicada no banco.
     const repetir = job.tipo === 'simulacao' && err.retentavel && tentativas < config.ROBO_MAX_TENTATIVAS;
-    log.warn({ id: ref.id, tipo: job.tipo, codigo: err.codigo, etapa: err.etapa, tentativas, repetir }, 'falha no robô');
+    log.warn(`falha no robô: tipo=${job.tipo} codigo=${err.codigo} etapa=${err.etapa ?? '-'} tentativas=${tentativas} repetir=${repetir} detalhe=${err.detalhe ?? '-'}`);
     const msgUsuario = err.codigo === 'DADOS_INVALIDOS' ? err.message.replace(/^Portal recusou (os dados|a proposta): /, '')
       : err.codigo === 'ENVIO_INCERTO' ? err.message
       : err.codigo === 'ACAO_HUMANA' ? 'O envio está bloqueado por uma pendência na conta do correspondente. Avise o administrador.'
       : 'Tente novamente em instantes ou fale com o suporte.';
     await ref.update(repetir
       ? { status: 'pendente', worker: null }
-      : { status: 'erro', erro: { codigo: err.codigo, etapa: err.etapa ?? null, mensagemUsuario: msgUsuario }, concluidoEm: Timestamp.now(), ...(job.tipo === 'proposta' ? { proposta: FieldValue.delete() } : {}) });
+      : { status: 'erro', erro: { codigo: err.codigo, etapa: err.etapa ?? null, detalhe: err.detalhe ?? null, mensagemUsuario: msgUsuario }, concluidoEm: Timestamp.now(), ...(job.tipo === 'proposta' ? { proposta: FieldValue.delete() } : {}) });
     await ref.collection('historico').add({ status: repetir ? 'pendente' : 'erro', codigo: err.codigo, em: Timestamp.now() });
   }
 }
