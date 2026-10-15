@@ -1,8 +1,9 @@
 // IDs do formulário e do resultado extraídos do "Simulador Isolado" salvo pelo usuário (HTML real do portal) — confiáveis.
-// ⚠️ AINDA PLACEHOLDER: `login` e `menu` (a página salva não contém a tela de login nem o menu, que são carregados por script).
+// ⚠️ AINDA PLACEHOLDER: o botão de entrar do login e o `menu` (a página salva não contém a tela de login nem o menu).
 // Grave-os com `npx playwright codegen <URL>` ou me envie prints/HTML da tela de login e do menu.
 export const S = {
-  login: { usuario: '#usuario', senha: '#senha', entrar: 'button[type=submit]', erro: '.mensagem-erro', logado: '#includeSidebar' }, // PLACEHOLDER
+  // Login: página /Portal/ (form #loginForm, campos username/password — vistos em util.js). O botão ainda é PLACEHOLDER.
+  login: { usuario: '#loginForm input[name=username]', senha: '#loginForm input[name=password]', entrar: '#loginForm button[type=submit]' },
   menu: { simuladorIsolado: 'text=Simulador Isolado' },                                                                            // PLACEHOLDER
   form: {
     nome: '#txtNome', cpf: '#txtCPFPrincipal', nascimento: '#txtDataNascimentoPrimario', cep: '#txtCepPrincipal',
@@ -22,5 +23,4 @@ export const S = {
     somatorio: '#lblValorSomatorioParcelas', totalFinanciado: '#colValorTotalFinanciamento', sistema: '#colSistemaAmortizacao',
     seguradora: '#colSeguradora', linhaCredito: '#colLinhaCredito', taxa: '#colTaxaJurosSimulada', cet: '#colCET', data: '#lblDataSimulacao',
   },
-  sair: 'text=Sair', // PLACEHOLDER
 } as const;

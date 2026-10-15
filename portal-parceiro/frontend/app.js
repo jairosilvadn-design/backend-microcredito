@@ -85,9 +85,16 @@ const comprador = (p) => ({
   cep: soDigitos($(`${p}-cep`).value), rendaBruta: valor(`${p}-renda`), celular: soDigitos($(`${p}-cel`).value), email: $(`${p}-email`).value.trim(),
 });
 
+function maiorDeIdade(iso) {
+  const [a, m, d] = iso.split('-').map(Number);
+  const hoje = new Date();
+  return new Date(hoje.getFullYear() - 18, hoje.getMonth(), hoje.getDate()) >= new Date(a, m - 1, d);
+}
+
 function validar(c1, c2, op) {
   if (!cpfValido(c1.cpf)) return 'CPF do comprador principal inválido.';
   if (c2 && !cpfValido(c2.cpf)) return 'CPF do 2º comprador inválido.';
+  if (!maiorDeIdade(c1.nascimento) || (c2 && !maiorDeIdade(c2.nascimento))) return 'O comprador deve ter 18 anos ou mais.';
   if (c1.rendaBruta <= 0 || (c2 && c2.rendaBruta <= 0)) return 'Informe a renda bruta mensal.';
   if (op.valorImovel <= 0) return 'Informe o valor do imóvel.';
   if (op.entrada >= op.valorImovel) return 'A entrada deve ser menor que o valor do imóvel.';

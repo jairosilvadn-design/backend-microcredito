@@ -10,6 +10,7 @@ const digitar = async (page: Page, sel: string, texto: string) => {
   await page.locator(sel).click();
   await page.locator(sel).fill('');
   await page.locator(sel).pressSequentially(texto, { delay: 15 });
+  await page.locator(sel).blur(); // o portal consulta o CEP e valida CPF/renda no onblur
 };
 
 async function preencherComprador(page: Page, sel: Record<keyof typeof S.form.c2, string>, c: Comprador) {
