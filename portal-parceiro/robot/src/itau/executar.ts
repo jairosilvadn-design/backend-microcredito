@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import type { DadosProposta, DadosSimulacao, ResultadoItau, ResultadoProposta } from '../types.js';
 import { login, logout } from './login.js';
 import { enviarProposta } from './proposta.js';
+import { definirPaginaAtiva } from './utils.js';
 import { preencherESimular } from './simulacao.js';
 
 /** Abre um browser, roda o fluxo completo e SEMPRE fecha (finally). Um contexto limpo por proposta: sem vazar cookies/dados entre clientes. */
@@ -18,6 +19,7 @@ async function comSessao<T>(fn: (page: import('playwright-core').Page) => Promis
   context.setDefaultTimeout(config.ROBO_TIMEOUT_MS);
   context.setDefaultNavigationTimeout(config.ROBO_TIMEOUT_MS);
   const page = await context.newPage();
+  definirPaginaAtiva(page);
   try {
     await login(page);
     const r = await fn(page);
@@ -28,6 +30,7 @@ async function comSessao<T>(fn: (page: import('playwright-core').Page) => Promis
     if (process.env.DEBUG_SCREENSHOTS === '1') await page.screenshot({ path: `/tmp/erro-${Date.now()}.png` }).catch(() => undefined);
     throw e;
   } finally {
+    definirPaginaAtiva(null);
     await context.close().catch(() => undefined);
     if (dono) await browser.close().catch(() => undefined);
   }

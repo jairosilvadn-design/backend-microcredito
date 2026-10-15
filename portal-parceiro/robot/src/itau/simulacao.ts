@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import type { Comprador, DadosSimulacao, ResultadoItau } from '../types.js';
 import { RoboError } from './erros.js';
 import { S } from './seletores.js';
-import { centavos, etapa } from './utils.js';
+import { avisoDoPortal, centavos, etapa } from './utils.js';
 
 /** Campos com máscara (jquery.mask / maskMoney): digitar tecla a tecla é mais fiel que fill(). */
 const digitar = async (page: Page, sel: string, texto: string) => {
@@ -11,12 +11,23 @@ const digitar = async (page: Page, sel: string, texto: string) => {
   await page.locator(sel).fill('');
   await page.locator(sel).pressSequentially(texto, { delay: 15 });
   await page.locator(sel).blur(); // o portal consulta o CEP e valida CPF/renda no onblur
+  await recusaDoPortal(page, 'preencher');
 };
+
+/** O portal avisa regras/erros de campo com uma janela que bloqueia a tela: lemos o texto e repassamos ao corretor. */
+async function recusaDoPortal(page: Page, etapaNome: string) {
+  const aviso = await avisoDoPortal(page);
+  if (aviso) throw new RoboError('DADOS_INVALIDOS', `Portal recusou os dados: ${aviso}`, false, etapaNome);
+}
+
+/** Opções/checkbox do portal têm visual personalizado (input escondido): marcar sem exigir que o input esteja visível. */
+const marcar = (page: Page, sel: string, valor = true) => page.locator(sel).evaluate((el, v) => { const i = el as HTMLInputElement; if (i.checked !== v) i.click(); }, valor); // clica pelo próprio código da página: funciona com input escondido
 
 async function preencherComprador(page: Page, sel: Record<keyof typeof S.form.c2, string>, c: Comprador) {
   await page.fill(sel.nome, c.nome);
   await digitar(page, sel.cpf, c.cpf);
   await page.fill(sel.nascimento, c.nascimento); // <input type=date> exige AAAA-MM-DD
+  await page.locator(sel.nascimento).blur(); await recusaDoPortal(page, 'nascimento');
   await digitar(page, sel.cep, c.cep);
   await digitar(page, sel.renda, centavos(c.rendaBruta));
   await digitar(page, sel.celular, c.celular);
@@ -37,19 +48,19 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
     await page.selectOption(S.form.segmento, { label: c.segmento });
     await page.selectOption(S.form.estadoCivil, { label: c.estadoCivil });
     if (c.segundoComprador) {
-      await page.click(S.form.somarSim);
+      await marcar(page, S.form.somarSim);
       await preencherComprador(page, S.form.c2, c.segundoComprador);
-    } else await page.click(S.form.somarNao);
+    } else await marcar(page, S.form.somarNao);
   });
 
   await etapa('dados-financiamento', async () => {
     const o = d.operacao;
-    await page.setChecked(S.form.funcionario, d.cliente.funcionarioItau);
+    await marcar(page, S.form.funcionario, d.cliente.funcionarioItau);
     await page.selectOption(S.form.tipoImovel, { label: o.tipoImovel }); // as listas abaixo só habilitam depois do tipo de imóvel
     await page.selectOption(S.form.seguradora, { label: o.seguradora });
     await page.selectOption(S.form.sistema, { label: o.sistema });
-    await page.click(o.taxa === 'prefixada' ? S.form.taxaPrefixada : S.form.taxaPoupanca);
-    await page.setChecked(S.form.financiarItbi, o.financiarItbi);
+    await marcar(page, o.taxa === 'prefixada' ? S.form.taxaPrefixada : S.form.taxaPoupanca);
+    await marcar(page, S.form.financiarItbi, o.financiarItbi);
     await digitar(page, S.form.valorImovel, centavos(o.valorImovel));
     await digitar(page, S.form.entrada, centavos(o.entrada));
     await page.fill(S.form.prazo, String(o.prazoMeses));

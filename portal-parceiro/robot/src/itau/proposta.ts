@@ -3,12 +3,15 @@ import { config } from '../config.js';
 import type { DadosProposta, PessoaProposta, ResultadoProposta } from '../types.js';
 import { RoboError } from './erros.js';
 import { S } from './seletores.js';
-import { centavos, etapa } from './utils.js';
+import { avisoDoPortal, centavos, etapa } from './utils.js';
 
 const P = S.proposta;
 const digitar = async (page: Page, sel: string, texto: string) => {
   const l = page.locator(sel); await l.click(); await l.fill(''); await l.pressSequentially(texto, { delay: 15 }); await l.blur();
+  const aviso = await avisoDoPortal(page); // regra/erro de campo mostrado pelo portal em janela
+  if (aviso) throw new RoboError('DADOS_INVALIDOS', `Portal recusou os dados: ${aviso}`, false, 'preencher');
 };
+const marcar = (page: Page, sel: string, valor = true) => page.locator(sel).evaluate((el, v) => { const i = el as HTMLInputElement; if (i.checked !== v) i.click(); }, valor); // clica pelo próprio código da página: funciona com input escondido
 const escolher = (page: Page, sel: string, value: string) => page.selectOption(sel, { value });
 
 /** Endereço: o portal consulta o CEP no blur e preenche rua/bairro/cidade/UF (campos bloqueados). Esperamos ele terminar. */
@@ -25,9 +28,9 @@ async function preencher(page: Page, d: DadosProposta) {
     await escolher(page, P.tipoImovel, f.tipoImovel); await escolher(page, P.estadoImovel, f.estadoImovel);
     await digitar(page, P.valorImovel, centavos(f.valorImovel)); await digitar(page, P.entrada, centavos(f.entrada));
     await page.fill(P.prazo, String(f.prazoMeses)); await escolher(page, P.seguradora, f.seguradora); await escolher(page, P.sistema, f.sistema);
-    await page.click(f.taxa === 'STANDARD' ? P.taxaPadrao : P.taxaPoupanca);
-    if (f.financiarItbi) { await page.check(P.financiarItbi); if (f.percentualItbi) await digitar(page, P.percentualItbi, f.percentualItbi); }
-    if (f.financiarAvaliacao) await page.check(P.financiarAvaliacao);
+    await marcar(page, f.taxa === 'STANDARD' ? P.taxaPadrao : P.taxaPoupanca);
+    if (f.financiarItbi) { await marcar(page, P.financiarItbi); if (f.percentualItbi) await digitar(page, P.percentualItbi, f.percentualItbi); }
+    if (f.financiarAvaliacao) await marcar(page, P.financiarAvaliacao);
   });
   await etapa('proposta-comprador', async () => {
     await page.fill(P.p.nome, p.nome); await page.fill(P.p.nasc, p.nascimento); await digitar(page, P.p.cpf, p.cpf);
@@ -35,17 +38,17 @@ async function preencher(page: Page, d: DadosProposta) {
     await digitar(page, P.p.renda, centavos(p.rendaBruta)); await escolher(page, P.p.tipoRenda, p.tipoRenda);
     if (p.cnpj) await digitar(page, P.p.cnpj, p.cnpj);
     await page.fill(P.p.email, p.email); await digitar(page, P.p.tel, p.telefone); await escolher(page, P.p.estadoCivil, p.estadoCivil);
-    if (p.estadoCivil !== 'MARRIED') await page.click(p.uniaoEstavel ? P.p.uniaoSim : P.p.uniaoNao);
+    if (p.estadoCivil !== 'MARRIED') await marcar(page, p.uniaoEstavel ? P.p.uniaoSim : P.p.uniaoNao);
     if (d.conjuge) {
       await page.fill(P.c.nome, d.conjuge.nome); await digitar(page, P.c.cpf, d.conjuge.cpf); await page.fill(P.c.nasc, d.conjuge.nascimento); await digitar(page, P.c.tel, d.conjuge.telefone);
       if (d.conjuge.estadoCivil) await escolher(page, P.c.estadoCivil, d.conjuge.estadoCivil);
     }
   });
   await etapa('proposta-composicao-renda', async () => {
-    if (!d.compoeRenda || !d.segundo) { await page.click(P.compoeNao); return; }
-    const s = d.segundo; await page.click(P.compoeSim);
+    if (!d.compoeRenda || !d.segundo) { await marcar(page, P.compoeNao); return; }
+    const s = d.segundo; await marcar(page, P.compoeSim);
     await page.fill(P.s.nome, s.nome); await escolher(page, P.s.estadoCivil, s.estadoCivil); await page.fill(P.s.nasc, s.nascimento); await digitar(page, P.s.cpf, s.cpf);
-    if (s.mesmoEndereco) await page.click(P.s.mesmoSim); else { await page.click(P.s.mesmoNao); await cep(page, P.s.cep, P.s.endereco, s.cep); }
+    if (s.mesmoEndereco) await marcar(page, P.s.mesmoSim); else { await marcar(page, P.s.mesmoNao); await cep(page, P.s.cep, P.s.endereco, s.cep); }
     await digitar(page, P.s.renda, centavos(s.rendaBruta)); await escolher(page, P.s.tipoRenda, s.tipoRenda);
     if (s.cnpj) await digitar(page, P.s.cnpj, s.cnpj);
     await page.fill(P.s.email, s.email); await digitar(page, P.s.tel, s.telefone);
@@ -56,8 +59,8 @@ async function preencher(page: Page, d: DadosProposta) {
       const alvo = opcoes.find((o) => o.v === d.pdv || o.t.includes(d.pdv)) ?? (opcoes.length === 1 ? opcoes[0] : null);
       if (!alvo) throw new RoboError('DADOS_INVALIDOS', `PDV "${d.pdv}" não existe na conta do portal`, false, 'pdv');
       await page.selectOption(P.pdv, alvo.v);
-    } else if (d.canal.vincularParceiro) { await page.click(P.canalSim); await page.fill(P.codigoItau, d.canal.codigoItau); } else await page.click(P.canalNao);
-    await page.click(d.contato.preferencial ? P.contatoSim : P.contatoNao);
+    } else if (d.canal.vincularParceiro) { await marcar(page, P.canalSim); await page.fill(P.codigoItau, d.canal.codigoItau); } else await marcar(page, P.canalNao);
+    await marcar(page, d.contato.preferencial ? P.contatoSim : P.contatoNao);
     await page.fill(P.contatoNome, d.contato.nome); await page.fill(P.contatoEmail, d.contato.email); await digitar(page, P.contatoTel, d.contato.telefone);
   });
 }
