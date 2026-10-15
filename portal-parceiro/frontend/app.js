@@ -44,7 +44,7 @@ let claimsAtuais = {};
 let perfilAtual = {};
 
 // ---------- Listas de seleção ----------
-for (const [id, lista] of Object.entries({ segmento: opcoes.segmento, estadoCivil: opcoes.estadoCivil, tipoImovel: opcoes.tipoImovel, seguradora: opcoes.seguradora, sistema: opcoes.sistema })) {
+for (const [id, lista] of Object.entries({ estadoCivil: opcoes.estadoCivil, tipoImovel: opcoes.tipoImovel, seguradora: opcoes.seguradora, sistema: opcoes.sistema })) {
   const sel = $(id);
   sel.append(new Option('Selecione', ''));
   lista.forEach((t) => sel.append(new Option(t, t)));
@@ -178,7 +178,7 @@ $('form-sim').onsubmit = async (e) => {
     const ref = await addDoc(collection(db, 'propostas'), {
       tipo: 'simulacao', status: 'pendente', resultado: null, erro: null, tentativas: 0,
       corretorUid: auth.currentUser.uid, imobiliariaId: claims.imobiliariaId,
-      cliente: { ...c1, segmento: $('segmento').value, estadoCivil: $('estadoCivil').value, funcionarioItau: $('funcionario').checked, segundoComprador: c2 },
+      cliente: { ...c1, estadoCivil: $('estadoCivil').value, funcionarioItau: $('funcionario').checked, segundoComprador: c2 },
       operacao: op,
       criadoEm: serverTimestamp(),
     });

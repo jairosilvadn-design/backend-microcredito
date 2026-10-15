@@ -8,7 +8,7 @@ export const S = {
   form: {
     nome: '#txtNome', cpf: '#txtCPFPrincipal', nascimento: '#txtDataNascimentoPrimario', cep: '#txtCepPrincipal',
     renda: '#txtRendaPrincipal', celular: '#txtTelefone', email: '#txtEmail',
-    segmento: '#PerfilCliente', estadoCivil: '#Estado_Civil_Principal',
+    estadoCivil: '#Estado_Civil_Principal',
     somarSim: '#Somar_rendaY', somarNao: '#Somar_rendaN',
     c2: { nome: '#txtNomeSegundoComprador', cpf: '#txtCPFSecundario', nascimento: '#txtDataNascimentoSecundario', cep: '#txtCepSecundario',
           renda: '#txtRendaSecundario', celular: '#txtTelefoneSecundario', email: '#txtEmailSecundario' },

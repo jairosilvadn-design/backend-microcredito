@@ -3,7 +3,7 @@ export interface Comprador {
   cep: string; rendaBruta: number; celular: string; email: string;
 }
 export interface DadosSimulacao {
-  cliente: Comprador & { segmento: string; estadoCivil: string; funcionarioItau: boolean; segundoComprador: Comprador | null };
+  cliente: Comprador & { segmento?: string; estadoCivil: string; funcionarioItau: boolean; segundoComprador: Comprador | null };
   operacao: {
     tipoImovel: string; seguradora: string; sistema: string; taxa: 'prefixada' | 'poupanca';
     financiarItbi: boolean; valorImovel: number; entrada: number; prazoMeses: number;

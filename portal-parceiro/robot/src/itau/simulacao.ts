@@ -21,7 +21,7 @@ async function recusaDoPortal(page: Page, etapaNome: string) {
 }
 
 /** Opções/checkbox do portal têm visual personalizado (input escondido): marcar sem exigir que o input esteja visível. */
-const marcar = (page: Page, sel: string, valor = true) => page.locator(sel).evaluate((el, v) => { const i = el as HTMLInputElement; if (i.checked !== v) i.click(); }, valor); // clica pelo próprio código da página: funciona com input escondido
+const marcar = (page: Page, sel: string, valor = true) => page.locator(sel).first().evaluate((el, v) => { const i = el as HTMLInputElement; if (i.checked !== v) i.click(); }, valor); // clica pelo próprio código da página: funciona com input escondido
 
 async function preencherComprador(page: Page, sel: Record<keyof typeof S.form.c2, string>, c: Comprador) {
   await page.fill(sel.nome, c.nome);
@@ -45,7 +45,7 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
     const c = d.cliente;
     await page.focus(S.form.nome); // o foco dispara o carregamento das listas (tipo de imóvel, seguradora, sistema)
     await preencherComprador(page, { nome: S.form.nome, cpf: S.form.cpf, nascimento: S.form.nascimento, cep: S.form.cep, renda: S.form.renda, celular: S.form.celular, email: S.form.email }, c);
-    await page.selectOption(S.form.segmento, { label: c.segmento });
+    // "Segmento" (#PerfilCliente) fica escondido no portal e não entra na simulação: não é preenchido.
     await page.selectOption(S.form.estadoCivil, { label: c.estadoCivil });
     if (c.segundoComprador) {
       await marcar(page, S.form.somarSim);
@@ -56,9 +56,9 @@ export async function preencherESimular(page: Page, d: DadosSimulacao): Promise<
   await etapa('dados-financiamento', async () => {
     const o = d.operacao;
     await marcar(page, S.form.funcionario, d.cliente.funcionarioItau);
-    await page.selectOption(S.form.tipoImovel, { label: o.tipoImovel }); // as listas abaixo só habilitam depois do tipo de imóvel
-    await page.selectOption(S.form.seguradora, { label: o.seguradora });
-    await page.selectOption(S.form.sistema, { label: o.sistema });
+    await page.locator(S.form.tipoImovel).first().selectOption({ label: o.tipoImovel }); // ids repetidos na página: usa o primeiro (formulário ativo) // as listas abaixo só habilitam depois do tipo de imóvel
+    await page.locator(S.form.seguradora).first().selectOption({ label: o.seguradora }); // ids repetidos na página: usa o primeiro (formulário ativo)
+    await page.locator(S.form.sistema).first().selectOption({ label: o.sistema }); // ids repetidos na página: usa o primeiro (formulário ativo)
     await marcar(page, o.taxa === 'prefixada' ? S.form.taxaPrefixada : S.form.taxaPoupanca);
     await marcar(page, S.form.financiarItbi, o.financiarItbi);
     await digitar(page, S.form.valorImovel, centavos(o.valorImovel));
