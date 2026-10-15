@@ -23,7 +23,13 @@ const mostrar = (t) => {
   $('nav-prop').classList.toggle('ativo', ['tela-proposta', 'tela-revisao', 'tela-proposta-resultado'].includes(t));
   window.scrollTo(0, 0);
 };
-const carregando = (on, txt) => { $('carregando').classList.toggle('hidden', !on); if (txt) $('carregando-txt').textContent = txt; };
+let timerCarregando = null; let dispensado = false;
+const carregando = (on, txt) => {
+  $('carregando').classList.toggle('hidden', !on); if (txt) $('carregando-txt').textContent = txt;
+  clearTimeout(timerCarregando); $('carregando-fechar').classList.add('hidden');
+  if (on) { dispensado = false; timerCarregando = setTimeout(() => $('carregando-fechar').classList.remove('hidden'), 20000); }
+};
+$('carregando-fechar').onclick = () => { dispensado = true; $('carregando').classList.add('hidden'); $('form-sim').querySelector('#enviar').disabled = false; carregarHistorico(); };
 // Identidade visual (marca.js)
 document.documentElement.style.setProperty('--cor', marca.cor);
 document.documentElement.style.setProperty('--cor-clara', marca.corClara);
@@ -181,6 +187,7 @@ $('form-sim').onsubmit = async (e) => {
       const p = snap.data();
       if (!p || ['pendente', 'processando'].includes(p.status)) return;
       btn.disabled = false;
+      if (dispensado) { carregarHistorico(); unsubProposta?.(); return; } // o corretor seguiu navegando: o resultado aparece no Início
       renderResultado(p); mostrar('tela-resultado');
       carregando(false);
       unsubProposta?.();
