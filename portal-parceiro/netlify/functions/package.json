@@ -1,0 +1,2 @@
+{ "private": true, "type": "module",
+  "dependencies": { "@sparticuz/chromium": "^131.0.0", "playwright-core": "1.48.2", "firebase-admin": "^12.7.0", "zod": "^3.23.8" } }

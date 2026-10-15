@@ -1,0 +1,9 @@
+{
+  "indexes": [
+    { "collectionGroup": "propostas", "queryScope": "COLLECTION",
+      "fields": [ { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "criadoEm", "order": "ASCENDING" } ] },
+    { "collectionGroup": "propostas", "queryScope": "COLLECTION",
+      "fields": [ { "fieldPath": "corretorUid", "order": "ASCENDING" }, { "fieldPath": "criadoEm", "order": "DESCENDING" } ] }
+  ],
+  "fieldOverrides": []
+}

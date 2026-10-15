@@ -1,0 +1,15 @@
+[build]
+  publish = "frontend"
+  functions = "netlify/functions"   # só usado na OPÇÃO 1
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["@sparticuz/chromium", "playwright-core"]
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Cache-Control = "no-store"

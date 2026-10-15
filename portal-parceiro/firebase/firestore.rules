@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function logado() { return request.auth != null; }
+    function admin() { return logado() && request.auth.token.role == 'admin'; }
+    function aprovado() { return logado() && request.auth.token.role in ['admin', 'imobiliaria'] && request.auth.token.aprovado == true; }
+
+    // Cadastro do parceiro: o próprio usuário cria o pedido (sempre "pendente"); só o admin aprova.
+    match /parceiros/{uid} {
+      allow read: if logado() && (request.auth.uid == uid || admin());
+      allow create: if logado() && request.auth.uid == uid
+        && request.resource.data.status == 'pendente'
+        && request.resource.data.keys().hasOnly(['nome', 'cnpj', 'email', 'status', 'criadoEm']);
+      allow update, delete: if admin();
+    }
+
+    // Propostas: o corretor só CRIA (status fixo "pendente") e LÊ as suas. O robô escreve via Admin SDK (ignora regras).
+    match /propostas/{id} {
+      allow read: if aprovado() && (admin() || resource.data.corretorUid == request.auth.uid
+                                    || resource.data.imobiliariaId == request.auth.token.imobiliariaId && request.auth.token.gestor == true);
+      allow create: if aprovado()
+        && request.resource.data.status == 'pendente'
+        && request.resource.data.corretorUid == request.auth.uid
+        && request.resource.data.imobiliariaId == request.auth.token.imobiliariaId
+        && request.resource.data.resultado == null;
+      allow update, delete: if false;
+
+      match /historico/{h} { allow read: if aprovado(); allow write: if false; }
+    }
+  }
+}
