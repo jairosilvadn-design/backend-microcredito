@@ -307,7 +307,7 @@
         '<dt>WhatsApp</dt><dd>' + esc(c.whatsapp) + '</dd><dt>Cidade</dt><dd>' + esc(c.addressCity) + '/' + esc(c.addressState) + '</dd><dt>Ramo</dt><dd>' + esc(c.segmentLabel) + '</dd>' +
         '<dt>Nível</dt><dd>' + esc(c.level ? c.level.name : '—') + '</dd><dt>Ciclos pagos</dt><dd>' + esc(c.cyclesPaid) + '</dd>' +
         (c.capacity ? '<dt>Capacidade/dia</dt><dd>' + money(c.capacity.dailyCapacity) + '</dd>' : '') + '</dl>';
-      h += '<div class="acoes">' + (aberto ? '<span class="chip warn">Já tem contrato em aberto</span>' : '<a class="btn" href="#/clientes/' + esc(c.id) + '/contrato">Novo contrato</a>') +
+      h += '<div class="acoes">' + ('<a class="btn" href="#/clientes/' + esc(c.id) + '/contrato">Novo contrato</a>' + (aberto ? ' <span class="chip">Já tem contrato em aberto</span>' : '')) +
         '<a class="btn sm sec" target="_blank" rel="noopener" href="https://wa.me/' + esc(digitos(c.whatsapp)) + '">WhatsApp</a></div></div>';
       h += '<div class="card"><h3>Contratos</h3>';
       if (!(c.contracts || []).length) h += '<div class="muted">Nenhum contrato ainda.</div>';

@@ -254,7 +254,17 @@ export async function recalcularContrato(tx: Tx, contractId: string, refYmd = ym
 
   // Semáforo do cliente sempre acompanha o contrato, sem esperar o relógio das 7h.
   if (aplicar && (novoStatus === 'ACTIVE' || novoStatus === 'DEFAULTED')) {
-    const semaforo = maxAtraso >= 15 ? 'INADIMPLENTE' : maxAtraso > 0 ? 'ATRASADO' : 'ATIVO';
+    // Com vários contratos abertos, vale o pior atraso entre todos eles.
+    let pior = maxAtraso;
+    const outra = await tx.creditInstallment.findFirst({
+      where: { status: 'OVERDUE', contract: { borrowerId: c.borrowerId, id: { not: contractId }, status: { in: ['ACTIVE', 'DEFAULTED'] } } },
+      orderBy: { dueDate: 'asc' }, select: { dueDate: true },
+    });
+    if (outra) {
+      const dias = Math.floor((Date.now() - outra.dueDate.getTime()) / 86_400_000);
+      pior = Math.max(pior, dias);
+    }
+    const semaforo = pior >= 15 ? 'INADIMPLENTE' : pior > 0 ? 'ATRASADO' : 'ATIVO';
     await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: semaforo } });
   }
 
@@ -351,7 +361,7 @@ export async function registrarBaixa(prisma: PrismaClient, i: BaixaInput) {
       const next = atrasadas <= 2 ? await tx.creditLevel.findFirst({ where: { rank: (borrower.level?.rank ?? 1) + 1, active: true } }) : null;
       await tx.borrower.update({
         where: { id: borrower.id },
-        data: { status: 'EM_DIA', cyclesPaid: { increment: 1 }, ...(next ? { levelId: next.id } : {}) },
+        data: { cyclesPaid: { increment: 1 }, ...(next ? { levelId: next.id } : {}), ...(await temOutroAberto(tx, borrower.id, contract.id) ? {} : { status: 'EM_DIA' as const }) },
       });
       if (next) levelUp = next.name;
       await tx.creditNotification.create({
@@ -456,4 +466,9 @@ export async function conferirCarteira(prisma: PrismaClient, i: { corrigir: bool
     }, TX_OPTS);
   }
   return { contratosConferidos: contratos.length, divergencias, tudoCerto: divergencias.length === 0 };
+}
+
+async function temOutroAberto(tx: Tx, borrowerId: string, exceto: string): Promise<boolean> {
+  const n = await tx.creditContract.count({ where: { borrowerId, id: { not: exceto }, status: { in: ['DRAFT', 'AWAITING_SIGNATURE', 'SIGNED', 'ACTIVE', 'DEFAULTED'] } } });
+  return n > 0;
 }
