@@ -599,8 +599,6 @@ export async function creditRoutes(app: FastifyInstance) {
     const rule = canLendTo(b.personType, settings.regime);
     if (!rule.allowed) return reply.code(409).send({ error: 'regime_blocked', message: rule.reason });
 
-    const open = await prisma.creditContract.findFirst({ where: { borrowerId: b.id, status: { in: ['DRAFT', 'AWAITING_SIGNATURE', 'SIGNED', 'ACTIVE'] } } });
-    if (open) return reply.code(409).send({ error: 'open_contract', message: `Este cliente já tem o contrato ${open.number} em aberto (${open.status}).` });
 
     const level = body.levelId ? await prisma.creditLevel.findUnique({ where: { id: body.levelId } }) : b.level;
     const rate = body.ratePercent ?? num(level?.ratePercent ?? D(20));
@@ -913,7 +911,9 @@ export async function creditRoutes(app: FastifyInstance) {
           },
         });
       }
-      await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'LEAD' } });
+      const outros = await tx.creditContract.count({ where: { borrowerId: c.borrowerId, id: { not: id }, status: { in: ['DRAFT', 'AWAITING_SIGNATURE', 'SIGNED', 'ACTIVE', 'DEFAULTED'] } } });
+      const jaPagou = await tx.creditContract.count({ where: { borrowerId: c.borrowerId, status: 'PAID' } });
+      if (!outros && !jaPagou) await tx.borrower.update({ where: { id: c.borrowerId }, data: { status: 'LEAD' } });
     }, TX_OPTS);
 
     limparCacheDoRetrato();

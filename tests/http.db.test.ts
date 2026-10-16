@@ -61,7 +61,7 @@ async function main() {
   const ct = await j('POST', '/api/credito/contratos', { borrowerId: cli.body.id, principal: 300, installments: 120, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1), ratePercent: 20 });
   check(`contrato de 120 parcelas gerado em ${Date.now() - t0} ms`, ct.code === 201, JSON.stringify(ct.body));
   const ct2 = await j('POST', '/api/credito/contratos', { borrowerId: cli.body.id, principal: 300, installments: 10, frequency: 'DAILY', firstDueDate: addDaysYmd(ymdSaoPaulo(), 1) });
-  check('segundo contrato do mesmo cliente é recusado com mensagem clara', ct2.code === 409 && ct2.body.error === 'open_contract');
+  check('segundo contrato do mesmo cliente é liberado (sem quitar o atual)', ct2.code === 201, JSON.stringify(ct2.body));
 
   const token = new URL(ct.body.link).searchParams.get('t')!;
   const c0 = await prisma.creditContract.findUniqueOrThrow({ where: { id: ct.body.id }, include: { borrower: true } });
